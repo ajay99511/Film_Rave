@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* FilmRave "Midnight Marquee" tokens — dark-first, amber + teal accents. */
+@theme {
+  --color-marquee-bg: #0b0d10;
+  --color-marquee-surface: #14171c;
+  --color-marquee-border: #232830;
+  --color-marquee-text: #e7e9ec;
+  --color-marquee-muted: #9aa2ad;
+  --color-marquee-amber: #f5a623;
+  --color-marquee-teal: #2dd4bf;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: var(--color-marquee-bg);
+  color: var(--color-marquee-text);
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}

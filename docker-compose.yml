@@ -1,0 +1,24 @@
+# Local development database. Prod uses managed Postgres; this mirrors it 1:1
+# so the Prisma schema (including scalar-array columns) runs identically.
+# Usage: `docker compose up -d db` then `pnpm db:migrate && pnpm db:seed`.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: filmrave-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: filmrave
+      POSTGRES_PASSWORD: filmrave
+      POSTGRES_DB: filmrave
+    ports:
+      - "5432:5432"
+    volumes:
+      - filmrave-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filmrave -d filmrave"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  filmrave-pgdata:

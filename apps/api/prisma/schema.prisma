@@ -1,0 +1,296 @@
+// FilmRave API — PostgreSQL schema.
+// Mirrors the Flutter app's 13-model domain (lib/data/models). Column names use
+// @map(snake_case) so the DB is idiomatic while Prisma models stay camelCase.
+// The rating-visibility rule is enforced in application code (CircleAccessGuard
+// + RatingsService), not the DB, so aggregate/self views share one source.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberRole {
+  admin
+  member
+}
+
+enum RatingsShared {
+  none
+  approved
+  selective
+}
+
+enum RelationshipStatus {
+  friends
+  requested_by_me
+  requested_by_them
+  none
+}
+
+enum RatingSource {
+  app
+  imdb
+  letterboxd
+}
+
+enum OutingStatus {
+  planned
+  done
+}
+
+enum RsvpStatus {
+  going
+  maybe
+  cant_go
+}
+
+enum NotificationType {
+  rsvp_change
+  tickets_on_sale
+  outing_reminder
+  chat_message
+  friend_request
+  rating_imported
+}
+
+model User {
+  id           String   @id @default(cuid())
+  displayName  String   @map("display_name")
+  handle       String   @unique
+  // Phone number (E.164) is the primary identity. Email/password stay optional
+  // for the legacy path and future social logins.
+  phone        String?  @unique
+  email        String?  @unique
+  passwordHash String?  @map("password_hash")
+  avatarColor  String?  @map("avatar_color")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  memberships     CircleMember[]
+  ratings         Rating[]
+  messages        ChatMessage[]
+  watchlist       WatchlistEntry[]
+  rsvps           OutingRsvp[]
+  outingHypes     OutingHype[]
+  notifications   Notification[]
+  friendshipsFrom Friendship[]     @relation("friendshipUser")
+  friendshipsTo   Friendship[]     @relation("friendshipOther")
+
+  @@map("users")
+}
+
+// One-time passcode challenges for phone login. The code is stored hashed;
+// a challenge is single-use (consumedAt) and short-lived (expiresAt).
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, createdAt])
+  @@map("otp_challenges")
+}
+
+model Circle {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  members      CircleMember[]
+  messages     ChatMessage[]
+  outings      Outing[]
+  groupWatches GroupWatch[]
+
+  @@map("circles")
+}
+
+model CircleMember {
+  circleId       String        @map("group_id")
+  userId         String        @map("user_id")
+  role           MemberRole    @default(member)
+  ratingsShared  RatingsShared @default(none) @map("ratings_shared")
+  // Populated only when ratingsShared == selective.
+  sharedMovieIds Int[]         @default([]) @map("shared_movie_ids")
+
+  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([circleId, userId])
+  @@map("circle_members")
+}
+
+model Friendship {
+  userId  String             @map("user_id")
+  otherId String             @map("other_id")
+  status  RelationshipStatus
+
+  user  User @relation("friendshipUser", fields: [userId], references: [id], onDelete: Cascade)
+  other User @relation("friendshipOther", fields: [otherId], references: [id], onDelete: Cascade)
+
+  @@id([userId, otherId])
+  @@map("friendships")
+}
+
+// Global catalog cache, keyed by TMDB id. Rows without a tmdbId are unmatched
+// import samples staged before confirmation.
+model Movie {
+  tmdbId      Int     @id @map("tmdb_id")
+  title       String
+  releaseDate String  @map("release_date") // YYYY-MM-DD
+  overview    String?
+  posterUrl   String? @map("poster_url")
+  runtime     Int?
+  year        Int?
+
+  ratings   Rating[]
+  watchlist WatchlistEntry[]
+
+  @@map("movies")
+}
+
+model Rating {
+  userId      String       @map("user_id")
+  movieTmdbId Int          @map("movie_tmdb_id")
+  score       Int // invariant: 1..10, enforced in RatingsService
+  ratedAt     DateTime     @map("rated_at")
+  source      RatingSource @default(app)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie Movie @relation(fields: [movieTmdbId], references: [tmdbId], onDelete: Cascade)
+
+  @@id([userId, movieTmdbId])
+  @@map("ratings")
+}
+
+model ChatMessage {
+  id          String   @id @default(cuid()) @map("message_id")
+  circleId    String   @map("group_id")
+  movieTmdbId Int      @map("movie_tmdb_id")
+  userId      String   @map("user_id")
+  body        String
+  sentAt      DateTime @default(now()) @map("sent_at")
+
+  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([circleId, movieTmdbId, sentAt])
+  @@map("chat_messages")
+}
+
+model WatchlistEntry {
+  userId      String   @map("user_id")
+  movieTmdbId Int      @map("movie_tmdb_id")
+  addedAt     DateTime @default(now()) @map("added_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie Movie @relation(fields: [movieTmdbId], references: [tmdbId], onDelete: Cascade)
+
+  @@id([userId, movieTmdbId])
+  @@map("watchlist_entries")
+}
+
+model Outing {
+  id                String       @id @default(cuid()) @map("outing_id")
+  circleId          String       @map("group_id")
+  movieTmdbId       Int          @map("movie_tmdb_id")
+  status            OutingStatus @default(planned)
+  ticketsOnSaleDate String?      @map("tickets_on_sale_date")
+
+  circle       Circle        @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  rsvps        OutingRsvp[]
+  theaterVotes TheaterVote[]
+  nightVotes   NightVote[]
+  hypes        OutingHype[]
+
+  @@map("outings")
+}
+
+// Per-member excitement score (1..10) for an outing's movie. Group hype is the
+// average of these, mirroring the prototype's hype slider + group hype badge.
+model OutingHype {
+  outingId String @map("outing_id")
+  userId   String @map("user_id")
+  score    Int // invariant: 1..10, enforced in OutingsService
+
+  outing Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([outingId, userId])
+  @@map("outing_hypes")
+}
+
+// Proposed movie-night options for an outing. Mirrors TheaterVote: toggle-vote,
+// tie-break by insertion `position`.
+model NightVote {
+  outingId String   @map("outing_id")
+  optionId String   @map("option_id")
+  label    String // e.g. "Friday Night" or an ISO date
+  position Int
+  voterIds String[] @default([]) @map("voter_ids")
+
+  outing Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+
+  @@id([outingId, optionId])
+  @@map("night_votes")
+}
+
+model OutingRsvp {
+  outingId String     @map("outing_id")
+  userId   String     @map("user_id")
+  status   RsvpStatus
+
+  outing Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([outingId, userId])
+  @@map("outing_rsvps")
+}
+
+model TheaterVote {
+  outingId String   @map("outing_id")
+  optionId String   @map("option_id")
+  name     String
+  position Int
+  voterIds String[] @default([]) @map("voter_ids")
+
+  outing Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+
+  @@id([outingId, optionId])
+  @@map("theater_votes")
+}
+
+model GroupWatch {
+  circleId    String @map("group_id")
+  movieTmdbId Int    @map("movie_tmdb_id")
+  watchedDate String @map("watched_date") // YYYY-MM-DD
+
+  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+
+  @@id([circleId, movieTmdbId])
+  @@map("group_watches")
+}
+
+// In-app notifications. `data` carries type-specific payload (circleId,
+// outingId, movieTmdbId, actorId, ...) as JSON so the client can deep-link.
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String
+  data      Json             @default("{}")
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
