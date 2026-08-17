@@ -12,7 +12,12 @@ async function bootstrap(): Promise<void> {
   // Ratings-CSV imports post the file as a JSON string; lift the 100kb default.
   app.useBodyParser('json', { limit: '10mb' });
 
-  app.setGlobalPrefix('api/v1');
+  // Trust the first proxy hop so req.ip is the real client (correct per-IP rate
+  // limiting behind a platform load balancer: Render/Fly/Railway/etc.).
+  app.set('trust proxy', 1);
+
+  // `/health` stays outside the versioned prefix so platform probes hit a stable path.
+  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
