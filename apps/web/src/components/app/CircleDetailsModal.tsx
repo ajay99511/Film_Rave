@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Users, Film, Sparkles, Star, Edit, Trash2 } from 'lucide-react';
+import { X, Users, UserPlus, Film, Sparkles, Star, Edit, Trash2 } from 'lucide-react';
 import type { AppUserDto, CircleDto, FeedItemDto, MovieDto } from '@filmrave/shared';
 import { circles as circlesApi } from '@/lib/client';
 import { cn } from '@/lib/ui';
@@ -23,6 +23,7 @@ export function CircleDetailsModal({
   onClose,
   onOpenMovie,
   onOpenFeed,
+  onAddMembers,
   onEdit,
   onDelete,
 }: {
@@ -30,6 +31,7 @@ export function CircleDetailsModal({
   onClose: () => void;
   onOpenMovie: (circle: CircleDto, movie: MovieDto) => void;
   onOpenFeed: (circle: CircleDto) => void;
+  onAddMembers: (circle: CircleDto) => void;
   onEdit: (circle: CircleDto) => void;
   onDelete: (circle: CircleDto) => void;
 }) {
@@ -117,9 +119,14 @@ export function CircleDetailsModal({
                 <Stat label="Members" value={String(circle.members.length)} className="col-span-2 md:col-span-1" />
               </div>
               <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-orange-500" /> Member Roster
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-orange-500" /> Member Roster
+                  </h3>
+                  <button onClick={() => onAddMembers(circle)} className="text-orange-500 hover:text-orange-600 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider transition-colors">
+                    <UserPlus className="w-3 h-3" /> Add Friends
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {members.map((m) => (
                     <div key={m.user_id} className="flex items-center gap-3 p-2.5 bg-white dark:bg-[#1A1A1E] border border-slate-200 dark:border-slate-800 rounded-xl">

@@ -115,6 +115,7 @@ export function AppShell() {
   const [selectedFriends, setSelectedFriends] = useState<Set<string>>(new Set());
   const [confirmRemoveFriend, setConfirmRemoveFriend] = useState<AppUserDto | null>(null);
   const [inviteToCircleUser, setInviteToCircleUser] = useState<AppUserDto | null>(null);
+  const [inviteFriendsCircleId, setInviteFriendsCircleId] = useState<string | null>(null);
   const [expandedFriend, setExpandedFriend] = useState<string | null>(null);
 
   const activeCircle = circleList.find((c) => c.group_id === activeCircleId) ?? null;
@@ -581,6 +582,10 @@ export function AppShell() {
         <CircleDetailsModal
           circle={detailsCircle}
           onClose={() => setDetailsCircle(null)}
+          onAddMembers={(c) => {
+            setDetailsCircle(null);
+            setInviteFriendsCircleId(c.group_id);
+          }}
           onOpenFeed={(c) => {
             setDetailsCircle(null);
             setActiveCircleId(c.group_id);
@@ -659,6 +664,65 @@ export function AppShell() {
           onClose={() => setShowImport(false)}
           onImported={() => { refreshLibrary(); refreshFeed(); }}
         />
+      )}
+      {/* Invite friends to circle modal */}
+      {inviteFriendsCircleId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setInviteFriendsCircleId(null)} />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative w-full max-w-sm bg-white dark:bg-[#1A1A1D] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
+          >
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-orange-500" /> Add Friends to Circle
+              </h2>
+              <button onClick={() => setInviteFriendsCircleId(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-2 max-h-64 overflow-y-auto">
+              {acceptedFriends.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-4">You have no friends to invite yet.</p>
+              ) : (
+                acceptedFriends.map((u) => {
+                  const circle = circleList.find(c => c.group_id === inviteFriendsCircleId);
+                  const alreadyMember = circle?.members.some((m) => m.user_id === u.user_id);
+                  return (
+                    <button
+                      key={u.user_id}
+                      disabled={alreadyMember}
+                      onClick={async () => {
+                        await inviteToCircle(inviteFriendsCircleId, u.user_id);
+                        // The circle updates optimistically via inviteToCircle
+                      }}
+                      className={cn(
+                        'w-full flex items-center justify-between p-3 rounded-xl border transition-colors text-left',
+                        alreadyMember
+                          ? 'border-slate-200 dark:border-slate-800 opacity-50 cursor-not-allowed'
+                          : 'border-slate-200 dark:border-slate-800 hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10',
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar user={u} size="sm" />
+                        <div>
+                          <div className="font-bold text-sm text-slate-900 dark:text-white">{u.display_name}</div>
+                          <div className="text-[10px] text-slate-500">@{u.handle}</div>
+                        </div>
+                      </div>
+                      {alreadyMember ? (
+                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Check className="w-3 h-3"/> Added</span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-orange-500">Add +</span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+        </div>
       )}
       <AnimatePresence>
         {showNotifs && (
