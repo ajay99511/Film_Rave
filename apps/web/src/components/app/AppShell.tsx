@@ -3,18 +3,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  Award,
   Bell,
   CalendarDays,
   Check,
   Clapperboard,
+  Database,
   Film,
+  Globe,
   History,
+  Lock,
   LogOut,
   Menu,
+  Moon,
   Plus,
   Search,
   Shield,
+  Sparkles,
   Star,
+  Sun,
   Upload,
   Users,
   X,
@@ -39,19 +46,25 @@ import {
   watchlist as watchlistApi,
 } from '@/lib/client';
 import { useRequireAuth } from '@/lib/session';
+import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/ui';
 import { Avatar } from './Avatar';
 import { MovieCard } from './MovieCard';
 import { MovieRoomModal } from './MovieRoomModal';
 import { UpcomingCard } from './UpcomingCard';
-import { NewCircleModal } from './NewCircleModal';
+import { CircleFormModal } from './CircleFormModal';
+import { ConfirmModal } from './ConfirmModal';
 import { LogMovieModal } from './LogMovieModal';
 import { NotificationsPanel } from './NotificationsPanel';
 import { ImportRatingsModal } from './ImportRatingsModal';
+import { TMDBPopularSection } from './TMDBPopularSection';
+import { CircleDetailsModal } from './CircleDetailsModal';
+import { circleTheme } from './circle-theme';
 
 type UserMap = Record<string, AppUserDto>;
-type MainView = 'group' | 'watchlist' | 'rated' | 'friends' | 'circles';
+type MainView = 'group' | 'watchlist' | 'rated' | 'friends' | 'circles' | 'tmdb';
 type Tab = 'feed' | 'upcoming' | 'cowatched';
+type CircleFilter = 'all' | 'private' | 'public';
 
 const SHARING_LABEL: Record<RatingsShared, string> = {
   approved: 'Sharing all',
@@ -61,6 +74,7 @@ const SHARING_LABEL: Record<RatingsShared, string> = {
 
 export function AppShell() {
   const { user, ready, signOut } = useRequireAuth();
+  const { isDark, toggle: toggleTheme } = useTheme();
 
   const [circleList, setCircleList] = useState<CircleDto[]>([]);
   const [activeCircleId, setActiveCircleId] = useState<string | null>(null);
@@ -76,13 +90,18 @@ export function AppShell() {
   const [mainView, setMainView] = useState<MainView>('group');
   const [tab, setTab] = useState<Tab>('feed');
   const [openMovie, setOpenMovie] = useState<MovieDto | null>(null);
-  const [showNewCircle, setShowNewCircle] = useState(false);
+  const [circleForm, setCircleForm] = useState<{ mode: 'create' | 'edit'; circle?: CircleDto } | null>(null);
+  const [detailsCircle, setDetailsCircle] = useState<CircleDto | null>(null);
+  const [confirmDeleteCircle, setConfirmDeleteCircle] = useState<CircleDto | null>(null);
+  const [deletingCircle, setDeletingCircle] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<AppUserDto[]>([]);
+  const [circleFilter, setCircleFilter] = useState<CircleFilter>('all');
+  const [circleQuery, setCircleQuery] = useState('');
 
   const activeCircle = circleList.find((c) => c.group_id === activeCircleId) ?? null;
   const myMembership = activeCircle?.members.find((m) => m.user_id === user?.user_id);
@@ -191,6 +210,14 @@ export function AppShell() {
     () => Object.values(userMap).filter((u) => u.user_id !== user?.user_id),
     [userMap, user],
   );
+  const watchlistIds = useMemo(
+    () => new Set(watchlistEntries.map((w) => w.movie_tmdb_id)),
+    [watchlistEntries],
+  );
+  const ratedScores = useMemo(
+    () => Object.fromEntries(myRatings.map((r) => [r.movie_tmdb_id, r.score])),
+    [myRatings],
+  );
 
   if (!ready || !user) {
     return (
@@ -216,8 +243,8 @@ export function AppShell() {
       className={cn(
         'w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm',
         active
-          ? 'bg-slate-800 text-white font-bold'
-          : 'text-slate-400 hover:text-white hover:bg-slate-800/50 font-medium',
+          ? 'bg-orange-50 dark:bg-slate-800 text-orange-600 dark:text-white font-bold'
+          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 font-medium',
       )}
     >
       <Icon className="w-4 h-4" /> {label}
@@ -225,20 +252,20 @@ export function AppShell() {
   );
 
   return (
-    <div className="dark">
-      <div className="min-h-screen bg-[#0A0A0B] text-slate-100 font-sans flex overflow-hidden relative">
-        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-orange-600/10 blur-[128px] rounded-full pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-indigo-600/10 blur-[128px] rounded-full pointer-events-none" />
+    <div className="contents">
+      <div className="min-h-screen bg-slate-50 dark:bg-[#0A0A0B] text-slate-900 dark:text-slate-100 font-sans flex overflow-hidden relative transition-colors duration-200">
+        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-orange-500/20 dark:bg-orange-600/10 blur-[128px] rounded-full pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-indigo-500/20 dark:bg-indigo-600/10 blur-[128px] rounded-full pointer-events-none" />
 
         {/* Sidebar */}
         <aside
           className={cn(
-            'fixed md:static inset-y-0 left-0 z-50 w-64 border-r border-slate-800 bg-[#1A1A1D] flex flex-col flex-shrink-0 transition-transform duration-300',
+            'fixed md:static inset-y-0 left-0 z-50 w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#1A1A1D] flex flex-col flex-shrink-0 transition-transform duration-300',
             mobileNav ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
           )}
         >
           <div className="p-6 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-white font-bold text-xl tracking-tight">
+            <div className="flex items-center gap-3 text-slate-900 dark:text-white font-bold text-xl tracking-tight">
               <div className="w-8 h-8 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
                 <Clapperboard className="w-5 h-5 text-white" />
               </div>
@@ -259,6 +286,23 @@ export function AppShell() {
             <NavButton active={mainView === 'rated'} onClick={() => { setMainView('rated'); setMobileNav(false); }} icon={Star} label="Rated Movies" />
           </div>
           <div className="px-4 pb-4 space-y-1">
+            <div className="text-xs font-mono text-slate-500 uppercase tracking-wider px-2 mb-3">Database</div>
+            <button
+              onClick={() => { setMainView('tmdb'); setMobileNav(false); }}
+              className={cn(
+                'w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all text-sm',
+                mainView === 'tmdb'
+                  ? 'bg-orange-50 dark:bg-slate-800 text-orange-600 dark:text-white font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 font-medium',
+              )}
+            >
+              <span className="flex items-center gap-3">
+                <Database className="w-4 h-4 text-orange-500" /> TMDB Popular
+              </span>
+              <span className="px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-500 text-[10px] font-mono font-bold">25</span>
+            </button>
+          </div>
+          <div className="px-4 pb-4 space-y-1">
             <div className="text-xs font-mono text-slate-500 uppercase tracking-wider px-2 mb-3">Network</div>
             <NavButton active={mainView === 'friends'} onClick={() => { setMainView('friends'); setMobileNav(false); }} icon={Users} label="Friends" />
           </div>
@@ -272,8 +316,8 @@ export function AppShell() {
                 className={cn(
                   'w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all border mb-1',
                   activeCircleId === c.group_id && mainView === 'group'
-                    ? 'bg-slate-800/80 text-white border-slate-700/50'
-                    : 'border-transparent text-slate-400 hover:bg-slate-800/50',
+                    ? 'bg-orange-50 dark:bg-slate-800/80 text-orange-900 dark:text-white border-orange-200 dark:border-slate-700/50'
+                    : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50',
                 )}
               >
                 <div className="flex items-center gap-3">
@@ -287,14 +331,14 @@ export function AppShell() {
             ))}
           </div>
 
-          <div className="p-4 border-t border-slate-800/50">
+          <div className="p-4 border-t border-slate-200 dark:border-slate-800/50">
             <div className="flex items-center gap-3 px-2 py-2">
               <Avatar user={user} size="md" />
               <div className="flex flex-col items-start leading-tight flex-1">
-                <span className="text-sm font-medium text-slate-200">{user.display_name}</span>
+                <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{user.display_name}</span>
                 <span className="text-[10px] text-slate-500">@{user.handle}</span>
               </div>
-              <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-white">
+              <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-slate-900 dark:hover:text-white">
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
@@ -303,20 +347,20 @@ export function AppShell() {
 
         {/* Main */}
         <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-          <header className="flex-shrink-0 h-16 md:h-20 px-4 md:px-8 flex items-center justify-between border-b border-slate-800 bg-[#0A0A0B]/80 backdrop-blur-xl z-10">
+          <header className="flex-shrink-0 h-16 md:h-20 px-4 md:px-8 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-[#0A0A0B]/80 backdrop-blur-xl z-10">
             <div className="flex items-center gap-4">
               <button className="md:hidden text-slate-500" onClick={() => setMobileNav(true)}>
                 <Menu className="w-6 h-6" />
               </button>
-              <h1 className="text-lg md:text-2xl font-bold tracking-tight text-white flex items-center gap-3">
+              <h1 className="text-lg md:text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
                 {mainView === 'group' && (
                   <>
-                    <span className="text-orange-500">{activeCircle?.name ?? 'Circle'}</span>
+                    <span className="text-orange-600 dark:text-orange-500">{activeCircle?.name ?? 'Circle'}</span>
                     {myMembership && (
                       <button
                         onClick={cycleSharing}
                         title="Change your rating sharing"
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1A1A1D] border border-slate-800 text-[10px] md:text-xs font-mono text-slate-400 uppercase tracking-widest hover:border-orange-500 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1A1A1D] border border-slate-200 dark:border-slate-800 text-[10px] md:text-xs font-mono text-slate-500 dark:text-slate-400 uppercase tracking-widest hover:border-orange-500 transition-colors"
                       >
                         <Shield className="w-3 h-3" /> {SHARING_LABEL[myMembership.ratings_shared]}
                       </button>
@@ -327,9 +371,14 @@ export function AppShell() {
                 {mainView === 'rated' && 'Rated Movies'}
                 {mainView === 'friends' && 'Friends'}
                 {mainView === 'circles' && 'Your Circles'}
+                {mainView === 'tmdb' && (
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-orange-500" /> TMDB Popular
+                  </span>
+                )}
               </h1>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 md:gap-4">
               {mainView === 'group' && activeCircle && (
                 <div className="hidden md:flex -space-x-2">
                   {activeCircle.members.map((m) => {
@@ -338,10 +387,18 @@ export function AppShell() {
                   })}
                 </div>
               )}
-              <button onClick={() => setShowNotifs(true)} className="text-slate-400 hover:text-white relative">
+              <div className="w-px h-6 bg-slate-200 dark:bg-slate-800" />
+              <button
+                onClick={toggleTheme}
+                title={isDark ? 'Switch to light' : 'Switch to dark'}
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+              >
+                {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+              <button onClick={() => setShowNotifs(true)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white relative">
                 <Bell className="w-5 h-5" />
                 {unread > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-orange-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-orange-500 rounded-full text-[10px] font-bold flex items-center justify-center text-white">
                     {unread}
                   </span>
                 )}
@@ -357,6 +414,7 @@ export function AppShell() {
                 {mainView === 'rated' && renderRated()}
                 {mainView === 'friends' && renderFriends()}
                 {mainView === 'circles' && renderCircles()}
+                {mainView === 'tmdb' && renderTmdb()}
               </AnimatePresence>
             </div>
           </div>
@@ -373,15 +431,75 @@ export function AppShell() {
           onRated={() => { refreshFeed(); refreshLibrary(); }}
         />
       )}
-      {showNewCircle && (
-        <NewCircleModal
-          candidates={friendCandidates}
-          onClose={() => setShowNewCircle(false)}
-          onCreated={(c) => {
-            setCircleList((prev) => [...prev, c]);
+      {detailsCircle && (
+        <CircleDetailsModal
+          circle={detailsCircle}
+          onClose={() => setDetailsCircle(null)}
+          onOpenFeed={(c) => {
+            setDetailsCircle(null);
             setActiveCircleId(c.group_id);
             setMainView('group');
-            setShowNewCircle(false);
+          }}
+          onOpenMovie={(c, m) => {
+            setDetailsCircle(null);
+            setActiveCircleId(c.group_id);
+            setOpenMovie(m);
+          }}
+          onEdit={(c) => {
+            setDetailsCircle(null);
+            setCircleForm({ mode: 'edit', circle: c });
+          }}
+          onDelete={(c) => {
+            setDetailsCircle(null);
+            setConfirmDeleteCircle(c);
+          }}
+        />
+      )}
+      {circleForm && (
+        <CircleFormModal
+          mode={circleForm.mode}
+          circle={circleForm.circle}
+          candidates={friendCandidates}
+          currentUserId={user.user_id}
+          onClose={() => setCircleForm(null)}
+          onSaved={(c) => {
+            setCircleList((prev) =>
+              prev.some((x) => x.group_id === c.group_id)
+                ? prev.map((x) => (x.group_id === c.group_id ? c : x))
+                : [...prev, c],
+            );
+            if (circleForm.mode === 'create') {
+              setActiveCircleId(c.group_id);
+              setMainView('group');
+            }
+            setCircleForm(null);
+          }}
+        />
+      )}
+      {confirmDeleteCircle && (
+        <ConfirmModal
+          title="Delete this circle?"
+          body={`"${confirmDeleteCircle.name}" and its outings, chat, and co-watch history will be removed for everyone. This can't be undone.`}
+          confirmLabel="Delete circle"
+          busy={deletingCircle}
+          onCancel={() => setConfirmDeleteCircle(null)}
+          onConfirm={async () => {
+            const target = confirmDeleteCircle;
+            setDeletingCircle(true);
+            try {
+              await circlesApi.remove(target.group_id);
+              setCircleList((prev) => prev.filter((x) => x.group_id !== target.group_id));
+              setActiveCircleId((prev) => {
+                if (prev !== target.group_id) return prev;
+                const next = circleList.find((x) => x.group_id !== target.group_id);
+                return next?.group_id ?? null;
+              });
+              setConfirmDeleteCircle(null);
+            } catch {
+              /* leave dialog open so the user can retry */
+            } finally {
+              setDeletingCircle(false);
+            }
           }}
         />
       )}
@@ -577,35 +695,200 @@ export function AppShell() {
     );
   }
 
-  function renderCircles() {
+  function renderTmdb() {
     return (
-      <motion.div key="circles" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {circleList.map((c) => (
-          <button
-            key={c.group_id}
-            onClick={() => { setActiveCircleId(c.group_id); setMainView('group'); }}
-            className="bg-[#141417] border border-slate-800 rounded-3xl p-6 text-left hover:border-orange-500 transition-colors"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-black italic tracking-tight">{c.name}</h2>
-              <div className="flex -space-x-2">
-                {c.members.slice(0, 5).map((m) => {
-                  const u = userMap[m.user_id];
-                  return u ? <Avatar key={m.user_id} user={u} size="sm" ring className="border-[#141417]" /> : null;
-                })}
+      <motion.div key="tmdb" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <TMDBPopularSection
+          watchlistIds={watchlistIds}
+          ratedScores={ratedScores}
+          onChanged={refreshLibrary}
+          onPlanParty={planParty}
+        />
+      </motion.div>
+    );
+  }
+
+  /** Create a watch-party outing for a movie in the active (or first) circle. */
+  async function planParty(movie: MovieDto) {
+    if (movie.tmdb_id == null) return;
+    const circleId = activeCircleId ?? circleList[0]?.group_id;
+    if (!circleId) {
+      // No circle to attach the outing to — send the user to create one first.
+      setCircleForm({ mode: 'create' });
+      return;
+    }
+    try {
+      await outingsApi.create(circleId, { movie_tmdb_id: movie.tmdb_id });
+    } catch {
+      return;
+    }
+    setActiveCircleId(circleId);
+    setMainView('group');
+    setTab('upcoming');
+    const [os] = await Promise.all([outingsApi.list(circleId).catch(() => outings)]);
+    setOutings(os);
+    hydrateMovies(os.map((o) => o.movie_tmdb_id));
+  }
+
+  function renderCircles() {
+    const allMemberIds = new Set(circleList.flatMap((c) => c.members.map((m) => m.user_id)));
+    const q = circleQuery.trim().toLowerCase();
+    const visible = circleList.filter((c) => {
+      const t = circleTheme(c);
+      const matches =
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q) ||
+        t.genre.toLowerCase().includes(q);
+      if (circleFilter === 'private') return matches && t.privacy === 'Private';
+      if (circleFilter === 'public') return matches && t.privacy === 'Public';
+      return matches;
+    });
+
+    return (
+      <motion.div key="circles" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
+        {/* Analytics banner */}
+        <div className="bg-gradient-to-br from-slate-900 via-[#16161D] to-slate-950 border border-slate-800 rounded-3xl p-6 md:p-8 text-white relative overflow-hidden shadow-2xl">
+          <div className="absolute -top-10 -right-10 w-64 h-64 bg-orange-500/10 blur-[90px] rounded-full pointer-events-none" />
+          <div className="absolute -bottom-10 -left-10 w-64 h-64 bg-indigo-500/10 blur-[90px] rounded-full pointer-events-none" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-3 py-1 bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full text-xs font-mono font-bold flex items-center gap-1.5 uppercase tracking-wider">
+                  <Award className="w-3.5 h-3.5" /> Your Circles
+                </span>
               </div>
+              <h2 className="text-2xl md:text-3xl font-black italic tracking-tight uppercase">Movie Circles Overview</h2>
+              <p className="text-slate-400 text-xs md:text-sm mt-1 max-w-2xl leading-relaxed">
+                Every squad is a private <strong className="text-white">Movie Circle</strong> where you share ratings on your terms, plan outings, and talk films.
+              </p>
             </div>
-            <p className="text-slate-500 text-sm font-mono">{c.members.length} members</p>
+            <button
+              onClick={() => setCircleForm({ mode: 'create' })}
+              className="px-6 py-3.5 bg-orange-600 hover:bg-orange-500 text-white rounded-2xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-600/30 shrink-0"
+            >
+              <Plus className="w-4 h-4" /> Create New Circle
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5">
+              <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-0.5">Active Circles</span>
+              <span className="text-2xl font-black text-white">{circleList.length}</span>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5">
+              <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-0.5">Total Members</span>
+              <span className="text-2xl font-black text-orange-400">{allMemberIds.size}</span>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 col-span-2 sm:col-span-1">
+              <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-0.5">Access Types</span>
+              <span className="text-xs font-bold text-slate-200 mt-1 block">Private &amp; Public</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Search + filters */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={circleQuery}
+              onChange={(e) => setCircleQuery(e.target.value)}
+              placeholder="Search circles by name or genre…"
+              className="w-full bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl py-2.5 pl-10 pr-4 text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            {([
+              { id: 'all', label: `All (${circleList.length})`, icon: undefined },
+              { id: 'private', label: 'Private', icon: Lock },
+              { id: 'public', label: 'Public', icon: Globe },
+            ] as const).map((f) => {
+              const selected = circleFilter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setCircleFilter(f.id)}
+                  className={cn(
+                    'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap border',
+                    selected
+                      ? 'bg-orange-500 text-white border-orange-500 shadow-md'
+                      : 'bg-white dark:bg-[#141417] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300',
+                  )}
+                >
+                  {f.icon && <f.icon className="w-3.5 h-3.5" />}
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Circle cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {visible.map((c) => {
+            const t = circleTheme(c);
+            return (
+              <div
+                key={c.group_id}
+                className="bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden hover:border-slate-300 dark:hover:border-slate-700 transition-all shadow-lg flex flex-col"
+              >
+                <div className={cn('p-5 bg-gradient-to-r text-white relative', t.banner)}>
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <span className="px-2.5 py-0.5 rounded-full bg-white/20 backdrop-blur-md text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1 border border-white/20">
+                      <Film className="w-3 h-3" /> {t.genre}
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-white/20 backdrop-blur-md text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1 border border-white/20">
+                      {t.privacy === 'Private' ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+                      {t.privacy}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black italic tracking-tight uppercase leading-tight line-clamp-1">{c.name}</h3>
+                </div>
+                <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                  <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed line-clamp-2">
+                    {c.description || 'A movie-loving circle of friends.'}
+                  </p>
+                  <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-2">
+                          {c.members.slice(0, 5).map((m) => {
+                            const u = userMap[m.user_id];
+                            return u ? <Avatar key={m.user_id} user={u} size="sm" ring className="border-white dark:border-[#141417]" /> : null;
+                          })}
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-500 font-mono">{c.members.length} members</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setDetailsCircle(c)}
+                      className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-orange-500 hover:text-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs transition-colors text-center"
+                    >
+                      View Details
+                    </button>
+                    <button
+                      onClick={() => { setActiveCircleId(c.group_id); setMainView('group'); }}
+                      className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-xl text-xs transition-colors text-center"
+                    >
+                      Open Feed
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <button
+            onClick={() => setCircleForm({ mode: 'create' })}
+            className="border-2 border-dashed border-slate-300 dark:border-slate-800 hover:border-orange-500 rounded-3xl p-6 flex flex-col items-center justify-center text-slate-500 hover:text-orange-500 hover:bg-orange-500/5 transition-all min-h-[220px]"
+          >
+            <div className="w-12 h-12 rounded-full bg-orange-50 dark:bg-orange-500/10 flex items-center justify-center text-orange-500 mb-3">
+              <Plus className="w-6 h-6" />
+            </div>
+            <span className="font-extrabold uppercase tracking-wider text-xs">Create New Movie Circle</span>
           </button>
-        ))}
-        <button
-          onClick={() => setShowNewCircle(true)}
-          className="border-2 border-dashed border-slate-700 rounded-3xl p-6 flex flex-col items-center justify-center text-slate-500 hover:text-white hover:border-slate-600 transition-colors min-h-[140px]"
-        >
-          <Plus className="w-8 h-8 mb-2" />
-          <span className="font-bold">New circle</span>
-        </button>
+        </div>
       </motion.div>
     );
   }

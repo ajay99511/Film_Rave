@@ -17,7 +17,9 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    // `dark` by default so first paint matches the Midnight Marquee identity;
+    // ThemeProvider reconciles with the persisted choice on mount.
+    <html lang="en" className="dark">
       <body>{children}</body>
     </html>
   );

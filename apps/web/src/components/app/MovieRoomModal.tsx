@@ -155,17 +155,40 @@ export function MovieRoomModal({
               </div>
             </div>
 
-            {/* My rating — a correct 1..10 slider */}
+            {/* My rating — 1..10 quick-select grid + a precision slider */}
             <div className="mb-8 p-5 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/30 rounded-2xl">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4">
-                Your Rating
-              </h3>
               <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Your Rating
+                </h3>
+                {myScore > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-orange-500 text-white text-[10px] font-mono font-bold uppercase tracking-wider">
+                    {myScore >= 9 ? 'Masterpiece 🏆' : myScore >= 7 ? 'Great 👍' : myScore >= 5 ? 'Decent 🍿' : 'Poor 👎'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline justify-between mb-3">
                 <span className="font-mono text-3xl font-black text-orange-600 dark:text-orange-500">
                   {myScore > 0 ? myScore.toFixed(0) : '–'}
                   <span className="text-sm text-slate-400"> / 10</span>
                 </span>
                 <Star className="w-8 h-8 text-orange-500 fill-orange-500" />
+              </div>
+              <div className="grid grid-cols-10 gap-1 sm:gap-1.5 mb-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => commitRating(v)}
+                    className={`py-2 rounded-xl text-xs font-mono font-black transition-all border ${
+                      myScore === v
+                        ? 'bg-orange-500 text-white border-orange-500 scale-105 shadow-md shadow-orange-500/30 ring-2 ring-orange-400'
+                        : 'bg-white dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-orange-500 hover:text-orange-500'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
               </div>
               <input
                 type="range"
@@ -177,9 +200,9 @@ export function MovieRoomModal({
                 className="w-full accent-orange-500 h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer"
               />
               <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-1">
-                <span>0</span>
-                <span>5</span>
-                <span>10</span>
+                <span>Awful</span>
+                <span>Average</span>
+                <span>Masterpiece</span>
               </div>
             </div>
 

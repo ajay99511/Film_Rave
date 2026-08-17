@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Bind Tailwind's `dark:` variant to the `.dark` class (toggled by ThemeProvider)
+   rather than the OS media query, so the in-app theme switch is authoritative. */
+@variant dark (&:where(.dark, .dark *));
+
 /* FilmRave "Midnight Marquee" tokens — dark-first, amber + teal accents. */
 @theme {
   --color-marquee-bg: #0b0d10;
@@ -11,13 +15,20 @@
   --color-marquee-teal: #2dd4bf;
 }
 
-:root {
-  color-scheme: dark;
+/* Light is the base; `.dark` on <html> restores the Midnight Marquee palette.
+   The root layout ships `.dark` by default, so first paint is unchanged. */
+html {
+  color-scheme: light;
+  background-color: #f8fafc;
+  color: #0f172a;
 }
 
-html,
-body {
+html.dark {
+  color-scheme: dark;
   background-color: var(--color-marquee-bg);
   color: var(--color-marquee-text);
+}
+
+body {
   font-family: Inter, system-ui, -apple-system, sans-serif;
 }
