@@ -662,6 +662,19 @@ export const localBackend: Backend = {
       });
     },
 
+    async remove(otherId) {
+      const me = requireUserId();
+      mutate((database) => {
+        database.friendships = database.friendships.filter(
+          (f) =>
+            !(
+              (f.user_id === me && f.other_id === otherId) ||
+              (f.user_id === otherId && f.other_id === me)
+            ),
+        );
+      });
+    },
+
     async search(q) {
       const me = requireUserId();
       const needle = q.trim().toLowerCase().replace(/^@/, '');

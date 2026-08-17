@@ -7,7 +7,10 @@ import {
   Bell,
   CalendarDays,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clapperboard,
+  Clock,
   Database,
   Film,
   Globe,
@@ -18,11 +21,14 @@ import {
   Moon,
   Plus,
   Search,
+  Send,
   Shield,
   Sparkles,
   Star,
   Sun,
   Upload,
+  UserMinus,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -30,6 +36,7 @@ import type {
   AppUserDto,
   CircleDto,
   FeedItemDto,
+  FriendRelationshipDto,
   MovieDto,
   OutingDto,
   RatingDto,
@@ -65,6 +72,7 @@ type UserMap = Record<string, AppUserDto>;
 type MainView = 'group' | 'watchlist' | 'rated' | 'friends' | 'circles' | 'tmdb';
 type Tab = 'feed' | 'upcoming' | 'cowatched';
 type CircleFilter = 'all' | 'private' | 'public';
+type FriendsTab = 'friends' | 'pending' | 'circles';
 
 const SHARING_LABEL: Record<RatingsShared, string> = {
   approved: 'Sharing all',
@@ -85,10 +93,12 @@ export function AppShell() {
   const [myRatings, setMyRatings] = useState<RatingDto[]>([]);
   const [watchlistEntries, setWatchlistEntries] = useState<WatchlistEntryDto[]>([]);
   const [friendUsers, setFriendUsers] = useState<AppUserDto[]>([]);
+  const [friendRels, setFriendRels] = useState<FriendRelationshipDto[]>([]);
   const [unread, setUnread] = useState(0);
 
   const [mainView, setMainView] = useState<MainView>('group');
   const [tab, setTab] = useState<Tab>('feed');
+  const [friendsTab, setFriendsTab] = useState<FriendsTab>('friends');
   const [openMovie, setOpenMovie] = useState<MovieDto | null>(null);
   const [circleForm, setCircleForm] = useState<{ mode: 'create' | 'edit'; circle?: CircleDto } | null>(null);
   const [detailsCircle, setDetailsCircle] = useState<CircleDto | null>(null);
@@ -102,6 +112,10 @@ export function AppShell() {
   const [searchResults, setSearchResults] = useState<AppUserDto[]>([]);
   const [circleFilter, setCircleFilter] = useState<CircleFilter>('all');
   const [circleQuery, setCircleQuery] = useState('');
+  const [selectedFriends, setSelectedFriends] = useState<Set<string>>(new Set());
+  const [confirmRemoveFriend, setConfirmRemoveFriend] = useState<AppUserDto | null>(null);
+  const [inviteToCircleUser, setInviteToCircleUser] = useState<AppUserDto | null>(null);
+  const [expandedFriend, setExpandedFriend] = useState<string | null>(null);
 
   const activeCircle = circleList.find((c) => c.group_id === activeCircleId) ?? null;
   const myMembership = activeCircle?.members.find((m) => m.user_id === user?.user_id);
@@ -180,15 +194,56 @@ export function AppShell() {
 
   const refreshFriends = useCallback(async () => {
     const rels = await friendsApi.list().catch(() => []);
-    const ids = new Set<string>();
+    setFriendRels(rels);
+
+    // Collect all friend user IDs (any relationship status).
+    const friendIds = new Set<string>();
     rels.forEach((r) => {
-      if (r.status === 'friends') {
-        ids.add(r.user_id === user?.user_id ? r.other_id : r.user_id);
-      }
+      const otherId = r.user_id === user?.user_id ? r.other_id : r.user_id;
+      friendIds.add(otherId);
     });
-    // Names come from userMap (populated by circle members); keep known ones.
-    setFriendUsers((prev) => prev.filter((u) => ids.has(u.user_id)));
-  }, [user]);
+
+    // Resolve profiles for friend IDs not already in userMap.
+    const unknownIds = [...friendIds].filter((id) => !userMap[id]);
+    if (unknownIds.length > 0) {
+      // Use search to resolve each unknown user. In practice there are few.
+      const resolved = await Promise.all(
+        unknownIds.map((id) =>
+          friendsApi.search(id).catch(() => [] as AppUserDto[]),
+        ),
+      );
+      const found = resolved.flat();
+      if (found.length > 0) mergeUsers(found);
+    }
+
+    // Build friendUsers from the resolved userMap + any newly resolved users.
+    // We need to re-read userMap after mergeUsers, so use a callback:
+    setFriendUsers(() => {
+      // Read the latest userMap (mergeUsers may have just updated it).
+      const currentMap = { ...userMap };
+      // Also include users resolved above that aren't in the map yet.
+      const allUsers: AppUserDto[] = [];
+      for (const id of friendIds) {
+        if (currentMap[id]) allUsers.push(currentMap[id]);
+      }
+      return allUsers;
+    });
+  }, [user, userMap, mergeUsers]);
+
+  // Re-derive friendUsers when userMap changes (circle members load async).
+  useEffect(() => {
+    if (friendRels.length === 0) return;
+    const friendIds = new Set<string>();
+    friendRels.forEach((r) => {
+      const otherId = r.user_id === user?.user_id ? r.other_id : r.user_id;
+      friendIds.add(otherId);
+    });
+    setFriendUsers(
+      [...friendIds]
+        .map((id) => userMap[id])
+        .filter((u): u is AppUserDto => !!u),
+    );
+  }, [friendRels, userMap, user]);
 
   const runSearch = async (q: string) => {
     setSearch(q);
@@ -200,9 +255,51 @@ export function AppShell() {
 
   const addFriend = async (id: string) => {
     await friendsApi.request(id).catch(() => {});
-    // Seeded users are mutual friends already; reflect immediately.
-    const u = userMap[id];
-    if (u) setFriendUsers((prev) => (prev.some((x) => x.user_id === u.user_id) ? prev : [...prev, u]));
+    // Refresh to pick up the new relationship.
+    await refreshFriends();
+  };
+
+  const acceptFriend = async (otherId: string) => {
+    await friendsApi.accept(otherId).catch(() => {});
+    await refreshFriends();
+  };
+
+  const removeFriend = async (otherId: string) => {
+    await friendsApi.remove(otherId).catch(() => {});
+    setSelectedFriends((prev) => {
+      const next = new Set(prev);
+      next.delete(otherId);
+      return next;
+    });
+    setConfirmRemoveFriend(null);
+    await refreshFriends();
+  };
+
+  const toggleFriendSelect = (id: string) => {
+    setSelectedFriends((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const inviteToCircle = async (circleId: string, userId: string) => {
+    const circle = circleList.find((c) => c.group_id === circleId);
+    if (!circle) return;
+    const currentMemberIds = circle.members.map((m) => m.user_id);
+    if (currentMemberIds.includes(userId)) return; // already a member
+    try {
+      const updated = await circlesApi.update(circleId, {
+        member_ids: [...currentMemberIds, userId],
+      });
+      setCircleList((prev) =>
+        prev.map((c) => (c.group_id === updated.group_id ? updated : c)),
+      );
+      setInviteToCircleUser(null);
+    } catch {
+      /* error handling — leave modal open */
+    }
   };
 
   const coWatched = useMemo(() => feed.filter((f) => f.co_watched), [feed]);
@@ -214,6 +311,55 @@ export function AppShell() {
     () => new Set(watchlistEntries.map((w) => w.movie_tmdb_id)),
     [watchlistEntries],
   );
+  const friendIdSet = useMemo(
+    () => new Set(friendUsers.map((f) => f.user_id)),
+    [friendUsers],
+  );
+  const acceptedFriends = useMemo(
+    () => {
+      const acceptedIds = new Set<string>();
+      friendRels.forEach((r) => {
+        if (r.status === 'friends') {
+          acceptedIds.add(r.user_id === user?.user_id ? r.other_id : r.user_id);
+        }
+      });
+      return friendUsers.filter((u) => acceptedIds.has(u.user_id));
+    },
+    [friendRels, friendUsers, user],
+  );
+  const pendingIncoming = useMemo(
+    () => {
+      const ids = new Set<string>();
+      friendRels.forEach((r) => {
+        if (r.status === 'requested_by_them') {
+          ids.add(r.user_id === user?.user_id ? r.other_id : r.user_id);
+        }
+      });
+      return friendUsers.filter((u) => ids.has(u.user_id));
+    },
+    [friendRels, friendUsers, user],
+  );
+  const pendingOutgoing = useMemo(
+    () => {
+      const ids = new Set<string>();
+      friendRels.forEach((r) => {
+        if (r.status === 'requested_by_me') {
+          ids.add(r.user_id === user?.user_id ? r.other_id : r.user_id);
+        }
+      });
+      return friendUsers.filter((u) => ids.has(u.user_id));
+    },
+    [friendRels, friendUsers, user],
+  );
+  const sharedCirclesFor = useCallback(
+    (userId: string): CircleDto[] =>
+      circleList.filter((c) =>
+        c.members.some((m) => m.user_id === userId) &&
+        c.members.some((m) => m.user_id === user?.user_id),
+      ),
+    [circleList, user],
+  );
+  const pendingCount = pendingIncoming.length + pendingOutgoing.length;
   const ratedScores = useMemo(
     () => Object.fromEntries(myRatings.map((r) => [r.movie_tmdb_id, r.score])),
     [myRatings],
@@ -461,6 +607,7 @@ export function AppShell() {
           circle={circleForm.circle}
           candidates={friendCandidates}
           currentUserId={user.user_id}
+          preSelectedIds={circleForm.mode === 'create' && selectedFriends.size > 0 ? [...selectedFriends] : undefined}
           onClose={() => setCircleForm(null)}
           onSaved={(c) => {
             setCircleList((prev) =>
@@ -471,6 +618,7 @@ export function AppShell() {
             if (circleForm.mode === 'create') {
               setActiveCircleId(c.group_id);
               setMainView('group');
+              setSelectedFriends(new Set());
             }
             setCircleForm(null);
           }}
@@ -660,37 +808,399 @@ export function AppShell() {
 
   function renderFriends() {
     return (
-      <motion.div key="friends" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <div className="bg-[#141417] border border-slate-800 rounded-3xl p-6">
-          <h2 className="text-xl font-bold mb-4">Find Friends</h2>
-          <div className="relative mb-8">
+      <motion.div key="friends" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+        {/* Search bar */}
+        <div className="bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <UserPlus className="w-5 h-5 text-orange-500" /> Find Friends
+          </h2>
+          <div className="relative">
             <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
               onChange={(e) => runSearch(e.target.value)}
               placeholder="Search by @handle or name"
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-orange-500"
             />
           </div>
           {searchResults.length > 0 && (
-            <FriendList title="Search results" users={searchResults} friendIds={new Set(friendUsers.map((f) => f.user_id))} onAdd={addFriend} />
+            <div className="mt-4 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Search Results</h3>
+              {searchResults.map((u) => {
+                const isFriend = friendIdSet.has(u.user_id);
+                return (
+                  <div key={u.user_id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <Avatar user={u} size="md" />
+                      <div>
+                        <div className="font-bold text-sm">{u.display_name}</div>
+                        <div className="text-xs text-slate-500">@{u.handle}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => addFriend(u.user_id)}
+                      disabled={isFriend}
+                      className={cn(
+                        'px-4 py-1.5 border rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5',
+                        isFriend
+                          ? 'border-orange-500 text-orange-500 bg-orange-500/10'
+                          : 'border-slate-200 dark:border-slate-700 hover:bg-orange-500 hover:text-white hover:border-orange-500',
+                      )}
+                    >
+                      {isFriend ? (<><Check className="w-3 h-3" /> Friends</>) : (<><UserPlus className="w-3 h-3" /> Add</>)}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
-          <FriendList title="Your friends" users={friendUsers} friendIds={new Set(friendUsers.map((f) => f.user_id))} onAdd={addFriend} />
-          <div className="mt-10 pt-6 border-t border-slate-800">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Your invite link</h3>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 bg-slate-900 px-4 py-3 rounded-xl border border-slate-700 font-mono text-sm truncate">
-                filmrave.app/add/@{user!.handle}
-              </code>
-              <button
-                onClick={() => navigator.clipboard?.writeText(`filmrave.app/add/@${user!.handle}`)}
-                className="px-4 py-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-500"
+        </div>
+
+        {/* Sub-tabs: Friends | Pending | Circles */}
+        <div className="flex items-center gap-6 border-b border-slate-200 dark:border-slate-800">
+          {([
+            { id: 'friends' as const, label: `Friends (${acceptedFriends.length})`, icon: Users },
+            { id: 'pending' as const, label: `Pending${pendingCount > 0 ? ` (${pendingCount})` : ''}`, icon: Clock },
+            { id: 'circles' as const, label: `Circles (${circleList.length})`, icon: Users },
+          ]).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setFriendsTab(t.id)}
+              className={cn(
+                'pb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider relative whitespace-nowrap',
+                friendsTab === t.id
+                  ? 'text-slate-900 dark:text-white'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+              )}
+            >
+              <t.icon className="w-4 h-4" /> {t.label}
+              {t.id === 'pending' && pendingCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-orange-500 text-white text-[10px] font-bold">{pendingCount}</span>
+              )}
+              {friendsTab === t.id && (
+                <motion.div layoutId="friendTabInd" className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Friends sub-tab */}
+        {friendsTab === 'friends' && (
+          <div className="space-y-4">
+            {/* Selection action bar */}
+            {selectedFriends.size > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex items-center justify-between"
               >
-                Copy
-              </button>
+                <span className="text-sm font-bold text-orange-500">
+                  {selectedFriends.size} friend{selectedFriends.size !== 1 ? 's' : ''} selected
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedFriends(new Set())}
+                    className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-xl transition-colors"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCircleForm({ mode: 'create' });
+                    }}
+                    className="px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" /> Create Circle
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {acceptedFriends.length === 0 ? (
+              <EmptyState icon={Users} title="No friends yet" body="Search for people above to send friend requests." />
+            ) : (
+              acceptedFriends.map((u) => {
+                const isSelected = selectedFriends.has(u.user_id);
+                const isExpanded = expandedFriend === u.user_id;
+                const shared = sharedCirclesFor(u.user_id);
+                return (
+                  <div key={u.user_id} className="bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden transition-all hover:border-slate-300 dark:hover:border-slate-700">
+                    <div className="flex items-center gap-3 p-4">
+                      {/* Selection checkbox */}
+                      <button
+                        onClick={() => toggleFriendSelect(u.user_id)}
+                        className={cn(
+                          'w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors',
+                          isSelected
+                            ? 'bg-orange-500 border-orange-500'
+                            : 'border-slate-300 dark:border-slate-700 hover:border-orange-400',
+                        )}
+                      >
+                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      </button>
+                      <Avatar user={u} size="md" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm truncate">{u.display_name}</div>
+                        <div className="text-xs text-slate-500">@{u.handle}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => setInviteToCircleUser(u)}
+                          title="Invite to circle"
+                          className="p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10 rounded-xl transition-colors"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setConfirmRemoveFriend(u)}
+                          title="Remove friend"
+                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors"
+                        >
+                          <UserMinus className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setExpandedFriend(isExpanded ? null : u.user_id)}
+                          className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl transition-colors"
+                        >
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    {/* Expanded: shared circles */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800/60">
+                            <h4 className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-2">Shared Circles</h4>
+                            {shared.length === 0 ? (
+                              <p className="text-xs text-slate-500">No shared circles yet.</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {shared.map((c) => (
+                                  <button
+                                    key={c.group_id}
+                                    onClick={() => { setActiveCircleId(c.group_id); setMainView('group'); }}
+                                    className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-orange-500 hover:text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                                  >
+                                    <Users className="w-3 h-3" /> {c.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })
+            )}
+
+            {/* Invite link */}
+            <div className="bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Your invite link</h3>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-slate-50 dark:bg-slate-900 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 font-mono text-sm truncate">
+                  filmrave.app/add/@{user!.handle}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard?.writeText(`filmrave.app/add/@${user!.handle}`)}
+                  className="px-4 py-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-500 transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* Pending sub-tab */}
+        {friendsTab === 'pending' && (
+          <div className="space-y-6">
+            {/* Incoming */}
+            {pendingIncoming.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                  <UserPlus className="w-3.5 h-3.5" /> Incoming Requests
+                </h3>
+                <div className="space-y-2">
+                  {pendingIncoming.map((u) => (
+                    <div key={u.user_id} className="flex items-center justify-between p-4 bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl">
+                      <div className="flex items-center gap-3">
+                        <Avatar user={u} size="md" />
+                        <div>
+                          <div className="font-bold text-sm">{u.display_name}</div>
+                          <div className="text-xs text-slate-500">@{u.handle}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => acceptFriend(u.user_id)}
+                          className="px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-xl transition-colors"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => removeFriend(u.user_id)}
+                          className="px-4 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500 hover:border-red-500 text-xs font-bold rounded-xl transition-colors"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Outgoing */}
+            {pendingOutgoing.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5" /> Outgoing Requests
+                </h3>
+                <div className="space-y-2">
+                  {pendingOutgoing.map((u) => (
+                    <div key={u.user_id} className="flex items-center justify-between p-4 bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl">
+                      <div className="flex items-center gap-3">
+                        <Avatar user={u} size="md" />
+                        <div>
+                          <div className="font-bold text-sm">{u.display_name}</div>
+                          <div className="text-xs text-slate-500">@{u.handle}</div>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 text-xs font-bold rounded-xl flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" /> Pending
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pendingIncoming.length === 0 && pendingOutgoing.length === 0 && (
+              <EmptyState icon={Clock} title="No pending requests" body="Friend requests you send or receive will show up here." />
+            )}
+          </div>
+        )}
+
+        {/* Circles quick-access sub-tab */}
+        {friendsTab === 'circles' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Your Circles</h3>
+              <button
+                onClick={() => setCircleForm({ mode: 'create' })}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              >
+                <Plus className="w-3 h-3" /> New Circle
+              </button>
+            </div>
+            {circleList.length === 0 ? (
+              <EmptyState icon={Users} title="No circles yet" body="Create your first circle to start sharing movie ratings with friends." />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {circleList.map((c) => {
+                  const t = circleTheme(c);
+                  return (
+                    <div key={c.group_id} className="bg-white dark:bg-[#141417] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden hover:border-slate-300 dark:hover:border-slate-700 transition-all">
+                      <div className={cn('p-4 bg-gradient-to-r text-white', t.banner)}>
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-bold text-sm truncate">{c.name}</h4>
+                          <span className="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded-full">{c.members.length} members</span>
+                        </div>
+                      </div>
+                      <div className="p-4 flex items-center justify-between">
+                        <div className="flex -space-x-2">
+                          {c.members.slice(0, 4).map((m) => {
+                            const u = userMap[m.user_id];
+                            return u ? <Avatar key={m.user_id} user={u} size="sm" ring /> : null;
+                          })}
+                          {c.members.length > 4 && (
+                            <span className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-600 dark:text-slate-300 border-2 border-white dark:border-[#141417]">+{c.members.length - 4}</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setActiveCircleId(c.group_id); setMainView('group'); }}
+                          className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-orange-500 hover:text-white text-xs font-bold rounded-xl transition-colors"
+                        >
+                          Open Feed
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Confirm remove friend modal */}
+        {confirmRemoveFriend && (
+          <ConfirmModal
+            title="Remove friend?"
+            body={`Remove ${confirmRemoveFriend.display_name} from your friends? They will not be removed from any shared circles.`}
+            confirmLabel="Remove"
+            onCancel={() => setConfirmRemoveFriend(null)}
+            onConfirm={() => removeFriend(confirmRemoveFriend.user_id)}
+          />
+        )}
+
+        {/* Invite to circle modal */}
+        {inviteToCircleUser && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setInviteToCircleUser(null)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative w-full max-w-sm bg-white dark:bg-[#1A1A1D] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Send className="w-4 h-4 text-orange-500" /> Invite {inviteToCircleUser.display_name}
+                </h2>
+                <button onClick={() => setInviteToCircleUser(null)} className="text-slate-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-5 space-y-2 max-h-64 overflow-y-auto">
+                {circleList.length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-4">No circles to invite to. Create one first.</p>
+                ) : (
+                  circleList.map((c) => {
+                    const alreadyMember = c.members.some((m) => m.user_id === inviteToCircleUser.user_id);
+                    return (
+                      <button
+                        key={c.group_id}
+                        disabled={alreadyMember}
+                        onClick={() => inviteToCircle(c.group_id, inviteToCircleUser.user_id)}
+                        className={cn(
+                          'w-full flex items-center justify-between p-3 rounded-xl border transition-colors text-left',
+                          alreadyMember
+                            ? 'border-slate-200 dark:border-slate-800 opacity-50 cursor-not-allowed'
+                            : 'border-slate-200 dark:border-slate-800 hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10',
+                        )}
+                      >
+                        <div>
+                          <div className="font-bold text-sm">{c.name}</div>
+                          <div className="text-[10px] text-slate-500">{c.members.length} members</div>
+                        </div>
+                        {alreadyMember ? (
+                          <span className="text-[10px] font-bold text-slate-400">Already in</span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-orange-500">Invite →</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
       </motion.div>
     );
   }
@@ -928,49 +1438,4 @@ function PosterTile({ movie, title, score }: { movie?: MovieDto; title?: string;
   );
 }
 
-function FriendList({
-  title,
-  users,
-  friendIds,
-  onAdd,
-}: {
-  title: string;
-  users: AppUserDto[];
-  friendIds: Set<string>;
-  onAdd: (id: string) => void;
-}) {
-  if (users.length === 0) return null;
-  return (
-    <div className="mb-8">
-      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">{title}</h3>
-      <div className="space-y-4">
-        {users.map((u) => {
-          const added = friendIds.has(u.user_id);
-          return (
-            <div key={u.user_id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Avatar user={u} size="md" />
-                <div>
-                  <div className="font-bold">{u.display_name}</div>
-                  <div className="text-xs text-slate-500">@{u.handle}</div>
-                </div>
-              </div>
-              <button
-                onClick={() => onAdd(u.user_id)}
-                disabled={added}
-                className={cn(
-                  'px-4 py-1.5 border rounded-lg text-sm font-bold transition-colors flex items-center gap-1',
-                  added
-                    ? 'border-orange-500 text-orange-500 bg-orange-500/10'
-                    : 'border-slate-700 hover:bg-slate-800',
-                )}
-              >
-                {added ? (<><Check className="w-3 h-3" /> Friends</>) : 'Add'}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+/* FriendList component removed — functionality is now inline in renderFriends(). */

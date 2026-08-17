@@ -37,6 +37,7 @@ export function CircleFormModal({
   circle,
   candidates,
   currentUserId,
+  preSelectedIds,
   onClose,
   onSaved,
 }: {
@@ -45,6 +46,8 @@ export function CircleFormModal({
   /** Selectable users for the roster (friends + any existing members). */
   candidates: AppUserDto[];
   currentUserId: string;
+  /** Pre-selected member IDs when creating a circle from the friends tab. */
+  preSelectedIds?: string[];
   onClose: () => void;
   onSaved: (c: CircleDto) => void;
 }) {
@@ -54,7 +57,9 @@ export function CircleFormModal({
   const [privacy, setPrivacy] = useState<CirclePrivacy>(circle?.privacy ?? 'private');
   const [banner, setBanner] = useState(circle?.banner_gradient ?? BANNERS[0]);
   const [members, setMembers] = useState<string[]>(
-    circle ? circle.members.map((m) => m.user_id).filter((id) => id !== currentUserId) : [],
+    circle
+      ? circle.members.map((m) => m.user_id).filter((id) => id !== currentUserId)
+      : (preSelectedIds ?? []),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

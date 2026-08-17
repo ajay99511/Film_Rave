@@ -115,6 +115,7 @@ export interface FriendsApi {
   list(): Promise<FriendRelationshipDto[]>;
   request(otherId: string): Promise<void>;
   accept(otherId: string): Promise<void>;
+  remove(otherId: string): Promise<void>;
   search(q: string): Promise<AppUserDto[]>;
 }
 

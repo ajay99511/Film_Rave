@@ -226,6 +226,8 @@ export const httpBackend: Backend = {
       }),
     accept: (otherId) =>
       api<void>(`/friendships/${otherId}/accept`, { method: 'POST' }),
+    remove: (otherId) =>
+      api<void>(`/friendships/${otherId}`, { method: 'DELETE' }),
     search: (q) => api<AppUserDto[]>(`/users/search?q=${encodeURIComponent(q)}`),
   },
 
