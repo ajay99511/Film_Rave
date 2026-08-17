@@ -10,6 +10,12 @@ export const MemberRole = {
 } as const;
 export type MemberRole = (typeof MemberRole)[keyof typeof MemberRole];
 
+export const CirclePrivacy = {
+  Private: 'private',
+  Public: 'public',
+} as const;
+export type CirclePrivacy = (typeof CirclePrivacy)[keyof typeof CirclePrivacy];
+
 export const RatingsShared = {
   None: 'none',
   Approved: 'approved',

@@ -4,6 +4,7 @@
  * The API serializes Prisma rows into exactly these shapes.
  */
 import type {
+  CirclePrivacy,
   MemberRole,
   NotificationType,
   OutingStatus,
@@ -18,6 +19,8 @@ export interface AppUserDto {
   display_name: string;
   handle: string;
   avatar_color?: string | null;
+  /** Google profile picture URL, when available. */
+  avatar_url?: string | null;
 }
 
 export interface CircleMemberDto {
@@ -32,6 +35,11 @@ export interface CircleDto {
   group_id: string;
   name: string;
   description: string;
+  /** Display-only genre focus label (e.g. "Sci-Fi & Action"). */
+  genre_focus: string;
+  privacy: CirclePrivacy;
+  /** Tailwind gradient class string for the circle banner. */
+  banner_gradient: string;
   members: CircleMemberDto[];
 }
 
@@ -154,26 +162,10 @@ export interface ImportResultDto {
   staged_ratings: RatingDto[];
 }
 
-// --- Auth (phone-OTP) wire shapes ---
+// --- Auth wire shapes (Google OAuth → JWT) ---
 
 export interface AuthTokensDto {
   access_token: string;
   refresh_token: string;
   user: AppUserDto;
 }
-
-/** Response to POST /auth/otp/request. `dev_code` is only present outside prod. */
-export interface OtpRequestResultDto {
-  challenge_id: string;
-  expires_at: string; // ISO-8601
-  dev_code?: string;
-}
-
-/**
- * Response to POST /auth/otp/verify. Discriminated by `status`:
- * - `authenticated`: known phone → tokens issued.
- * - `needs_profile`: new phone → carry `signup_token` to /auth/complete-profile.
- */
-export type OtpVerifyResultDto =
-  | ({ status: 'authenticated' } & AuthTokensDto)
-  | { status: 'needs_profile'; signup_token: string };
