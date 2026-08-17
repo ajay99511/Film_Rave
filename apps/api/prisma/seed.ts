@@ -4,8 +4,9 @@
  * a catalog, ratings that exercise the visibility rule, and one fully-loaded
  * upcoming outing (hype + theater + night votes). Run: pnpm db:seed.
  *
- * Idempotent: safe to re-run. Login in dev is phone-OTP — any of the seeded
- * phones + the dev code printed by the API will sign you in as that user.
+ * Idempotent: safe to re-run. These seeded users exist to populate circles,
+ * friends, ratings, and an outing — you sign in as your own account via Google
+ * and can add/search these people as friends.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -20,11 +21,11 @@ const COLORS = [
 ];
 
 const PEOPLE = [
-  { handle: 'ajay', displayName: 'Ajay', phone: '+15550000001' },
-  { handle: 'sarah', displayName: 'Sarah', phone: '+15550000002' },
-  { handle: 'mike', displayName: 'Mike', phone: '+15550000003' },
-  { handle: 'emma', displayName: 'Emma', phone: '+15550000004' },
-  { handle: 'david', displayName: 'David', phone: '+15550000005' },
+  { handle: 'ajay', displayName: 'Ajay' },
+  { handle: 'sarah', displayName: 'Sarah' },
+  { handle: 'mike', displayName: 'Mike' },
+  { handle: 'emma', displayName: 'Emma' },
+  { handle: 'david', displayName: 'David' },
 ];
 
 const U = (id: string) =>
@@ -46,11 +47,12 @@ async function main(): Promise<void> {
     const p = PEOPLE[i];
     users[p.handle] = await prisma.user.upsert({
       where: { handle: p.handle },
-      update: { phone: p.phone, avatarColor: COLORS[i] },
+      update: { avatarColor: COLORS[i] },
       create: {
         handle: p.handle,
         displayName: p.displayName,
-        phone: p.phone,
+        email: `${p.handle}@example.com`,
+        googleId: `seed-${p.handle}`,
         avatarColor: COLORS[i],
       },
       select: { id: true },
@@ -195,7 +197,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Seeded circle ${circle.id} "The Inner Five". Dev login: phone ${PEOPLE[0].phone} (Ajay) + the OTP the API logs.`,
+    `Seeded circle ${circle.id} "The Inner Five". Sign in with Google as yourself, then search these handles (ajay, sarah, …) to add them.`,
   );
 }
 

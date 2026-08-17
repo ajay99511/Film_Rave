@@ -10,12 +10,21 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Runtime/pooled connection (app queries). On Neon use the *pooled* endpoint.
   url      = env("DATABASE_URL")
+  // Direct (non-pooled) connection used by Prisma Migrate/Introspect only.
+  // Locally set it equal to DATABASE_URL; on Neon use the direct endpoint.
+  directUrl = env("DIRECT_URL")
 }
 
 enum MemberRole {
   admin
   member
+}
+
+enum CirclePrivacy {
+  private
+  public
 }
 
 enum RatingsShared {
@@ -61,11 +70,11 @@ model User {
   id           String   @id @default(cuid())
   displayName  String   @map("display_name")
   handle       String   @unique
-  // Phone number (E.164) is the primary identity. Email/password stay optional
-  // for the legacy path and future social logins.
-  phone        String?  @unique
-  email        String?  @unique
-  passwordHash String?  @map("password_hash")
+  // Google is the sole identity provider. `email` + `googleId` (the Google
+  // subject) come from the verified ID token; `avatarUrl` is the Google picture.
+  email        String   @unique
+  googleId     String   @unique @map("google_id")
+  avatarUrl    String?  @map("avatar_url")
   avatarColor  String?  @map("avatar_color")
   createdAt    DateTime @default(now()) @map("created_at")
 
@@ -82,25 +91,15 @@ model User {
   @@map("users")
 }
 
-// One-time passcode challenges for phone login. The code is stored hashed;
-// a challenge is single-use (consumedAt) and short-lived (expiresAt).
-model OtpChallenge {
-  id         String    @id @default(cuid())
-  phone      String
-  codeHash   String    @map("code_hash")
-  attempts   Int       @default(0)
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  @@index([phone, createdAt])
-  @@map("otp_challenges")
-}
-
 model Circle {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
+  // Display identity for the circle card/banner. Genre focus is a free label;
+  // privacy is an access hint; bannerGradient is a Tailwind gradient class string.
+  genreFocus     String        @default("General / All Genres") @map("genre_focus")
+  privacy        CirclePrivacy @default(private)
+  bannerGradient String        @default("from-orange-600 via-amber-600 to-red-600") @map("banner_gradient")
   createdAt   DateTime @default(now()) @map("created_at")
 
   members      CircleMember[]
