@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import {
   isRatingShared,
   isRatingVisible,
+  type CirclePrivacy,
   RatingsShared,
   type AppUserDto,
   type CircleDto,
@@ -11,6 +12,13 @@ import {
   type RatingDto,
 } from '@filmrave/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
+
+/** Fields that describe a circle's card/banner identity. */
+export interface CircleIdentity {
+  genreFocus?: string;
+  privacy?: CirclePrivacy;
+  bannerGradient?: string;
+}
 
 @Injectable()
 export class CirclesService {
@@ -22,12 +30,14 @@ export class CirclesService {
     name: string,
     description: string,
     memberUserIds: string[],
+    identity: CircleIdentity = {},
   ): Promise<CircleDto> {
     const invitees = [...new Set(memberUserIds)].filter((id) => id !== creatorId);
     const circle = await this.prisma.circle.create({
       data: {
         name,
         description,
+        ...this.identityData(identity),
         members: {
           create: [
             { userId: creatorId, role: 'admin' },
@@ -37,7 +47,86 @@ export class CirclesService {
       },
       include: { members: true },
     });
-    return this.toCircleDto(circle.id, circle.name, circle.description, circle.members);
+    return this.toCircleDto(circle);
+  }
+
+  /**
+   * Edit a circle (admin only). Any subset of name/description/identity may be
+   * updated; passing `memberUserIds` replaces the roster (the requesting admin
+   * is always retained). Roles of surviving members are preserved.
+   */
+  async update(
+    circleId: string,
+    requesterId: string,
+    patch: {
+      name?: string;
+      description?: string;
+      identity?: CircleIdentity;
+      memberUserIds?: string[];
+    },
+  ): Promise<CircleDto> {
+    await this.assertAdmin(circleId, requesterId);
+
+    if (patch.memberUserIds) {
+      const desired = new Set([...patch.memberUserIds, requesterId]);
+      const current = await this.prisma.circleMember.findMany({ where: { circleId } });
+      const currentIds = new Set(current.map((m) => m.userId));
+      const toRemove = current.filter((m) => !desired.has(m.userId)).map((m) => m.userId);
+      const toAdd = [...desired].filter((id) => !currentIds.has(id));
+      await this.prisma.$transaction([
+        ...(toRemove.length
+          ? [
+              this.prisma.circleMember.deleteMany({
+                where: { circleId, userId: { in: toRemove } },
+              }),
+            ]
+          : []),
+        ...toAdd.map((userId) =>
+          this.prisma.circleMember.create({
+            data: { circleId, userId, role: 'member' },
+          }),
+        ),
+      ]);
+    }
+
+    await this.prisma.circle.update({
+      where: { id: circleId },
+      data: {
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...this.identityData(patch.identity ?? {}),
+      },
+    });
+    return this.getForUser(circleId, requesterId);
+  }
+
+  /** Delete a circle (admin only). Child rows cascade via the schema. */
+  async remove(circleId: string, requesterId: string): Promise<void> {
+    await this.assertAdmin(circleId, requesterId);
+    await this.prisma.circle.delete({ where: { id: circleId } });
+  }
+
+  private async assertAdmin(circleId: string, userId: string): Promise<void> {
+    const member = await this.prisma.circleMember.findUnique({
+      where: { circleId_userId: { circleId, userId } },
+    });
+    if (!member) throw new ForbiddenException('not a member of this circle');
+    if (member.role !== 'admin') {
+      throw new ForbiddenException('only a circle admin can do this');
+    }
+  }
+
+  /** Build the data patch for identity fields that were provided (create + update). */
+  private identityData(
+    identity: CircleIdentity,
+  ): { genreFocus?: string; privacy?: CirclePrivacy; bannerGradient?: string } {
+    return {
+      ...(identity.genreFocus !== undefined ? { genreFocus: identity.genreFocus } : {}),
+      ...(identity.privacy !== undefined ? { privacy: identity.privacy } : {}),
+      ...(identity.bannerGradient !== undefined
+        ? { bannerGradient: identity.bannerGradient }
+        : {}),
+    };
   }
 
   /** Update the requester's own rating-sharing preference within a circle. */
@@ -110,7 +199,7 @@ export class CirclesService {
       where: { members: { some: { userId } } },
       include: { members: true },
     });
-    return circles.map((c) => this.toCircleDto(c.id, c.name, c.description, c.members));
+    return circles.map((c) => this.toCircleDto(c));
   }
 
   async getForUser(circleId: string, userId: string): Promise<CircleDto> {
@@ -124,7 +213,7 @@ export class CirclesService {
     if (!circle.members.some((m) => m.userId === userId)) {
       throw new ForbiddenException('not a member of this circle');
     }
-    return this.toCircleDto(circle.id, circle.name, circle.description, circle.members);
+    return this.toCircleDto(circle);
   }
 
   /**
@@ -302,22 +391,28 @@ export class CirclesService {
     };
   }
 
-  private toCircleDto(
-    id: string,
-    name: string,
-    description: string,
+  private toCircleDto(circle: {
+    id: string;
+    name: string;
+    description: string;
+    genreFocus: string;
+    privacy: CirclePrivacy;
+    bannerGradient: string;
     members: {
       userId: string;
       role: CircleMemberDto['role'];
       ratingsShared: CircleMemberDto['ratings_shared'];
       sharedMovieIds: number[];
-    }[],
-  ): CircleDto {
+    }[];
+  }): CircleDto {
     return {
-      group_id: id,
-      name,
-      description,
-      members: members.map((m) => ({
+      group_id: circle.id,
+      name: circle.name,
+      description: circle.description,
+      genre_focus: circle.genreFocus,
+      privacy: circle.privacy,
+      banner_gradient: circle.bannerGradient,
+      members: circle.members.map((m) => ({
         user_id: m.userId,
         role: m.role,
         ratings_shared: m.ratingsShared,

@@ -28,6 +28,66 @@ export class MoviesService {
     return results.results.map((m) => this.toDto(m));
   }
 
+  /**
+   * Popular movies for the "TMDB Database" browse surface. TMDB pages hold 20
+   * items each, so we pull as many pages as `limit` needs and cache every row
+   * (fire-and-forget) so later detail/rating lookups are catalog hits.
+   */
+  async popular(limit = 25): Promise<MovieDto[]> {
+    const pages = Math.min(5, Math.max(1, Math.ceil(limit / 20)));
+    const batches = await Promise.all(
+      Array.from({ length: pages }, (_, i) =>
+        this.tmdb<{ results: TmdbMovie[] }>('/movie/popular', {
+          language: 'en-US',
+          page: String(i + 1),
+        }).catch(() => ({ results: [] as TmdbMovie[] })),
+      ),
+    );
+    const dtos = batches
+      .flatMap((b) => b.results)
+      .slice(0, limit)
+      .map((m) => this.toDto(m));
+    void this.cacheMany(dtos);
+    return dtos;
+  }
+
+  /** Upcoming theatrical releases (next ~6 weeks), newest interest first. */
+  async upcoming(): Promise<MovieDto[]> {
+    const res = await this.tmdb<{ results: TmdbMovie[] }>('/movie/upcoming', {
+      language: 'en-US',
+      page: '1',
+      region: 'US',
+    });
+    const dtos = res.results.map((m) => this.toDto(m));
+    void this.cacheMany(dtos);
+    return dtos;
+  }
+
+  /** Persist a batch of catalog rows, keyed by TMDB id (create-only upsert). */
+  private async cacheMany(dtos: MovieDto[]): Promise<void> {
+    await Promise.all(
+      dtos
+        .filter((d) => d.tmdb_id != null)
+        .map((d) =>
+          this.prisma.movie
+            .upsert({
+              where: { tmdbId: d.tmdb_id as number },
+              create: {
+                tmdbId: d.tmdb_id as number,
+                title: d.title,
+                releaseDate: d.release_date,
+                overview: d.overview ?? null,
+                posterUrl: d.poster_url ?? null,
+                runtime: d.runtime ?? null,
+                year: d.year ?? null,
+              },
+              update: {},
+            })
+            .catch(() => undefined),
+        ),
+    );
+  }
+
   /** Return a movie, hydrating and caching it from TMDB on cache miss. */
   async getOrFetch(tmdbId: number): Promise<MovieDto> {
     const cached = await this.prisma.movie.findUnique({ where: { tmdbId } });

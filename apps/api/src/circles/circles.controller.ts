@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -21,6 +22,7 @@ import {
   MinLength,
 } from 'class-validator';
 import {
+  CirclePrivacy,
   RatingsShared,
   type AppUserDto,
   type CircleDto,
@@ -46,6 +48,53 @@ class CreateCircleDto {
   @IsString({ each: true })
   @ArrayMaxSize(50)
   member_ids!: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  genre_focus?: string;
+
+  @IsOptional()
+  @IsEnum(CirclePrivacy)
+  privacy?: CirclePrivacy;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  banner_gradient?: string;
+}
+
+class UpdateCircleDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(50)
+  member_ids?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  genre_focus?: string;
+
+  @IsOptional()
+  @IsEnum(CirclePrivacy)
+  privacy?: CirclePrivacy;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  banner_gradient?: string;
 }
 
 class UpdateSharingDto {
@@ -83,12 +132,38 @@ export class CirclesController {
     @Body() dto: CreateCircleDto,
     @CurrentUser() user: AuthUser,
   ): Promise<CircleDto> {
-    return this.circles.create(
-      user.userId,
-      dto.name,
-      dto.description ?? '',
-      dto.member_ids,
-    );
+    return this.circles.create(user.userId, dto.name, dto.description ?? '', dto.member_ids, {
+      genreFocus: dto.genre_focus,
+      privacy: dto.privacy,
+      bannerGradient: dto.banner_gradient,
+    });
+  }
+
+  @Patch(':circleId')
+  updateCircle(
+    @Param('circleId') circleId: string,
+    @Body() dto: UpdateCircleDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CircleDto> {
+    return this.circles.update(circleId, user.userId, {
+      name: dto.name,
+      description: dto.description,
+      memberUserIds: dto.member_ids,
+      identity: {
+        genreFocus: dto.genre_focus,
+        privacy: dto.privacy,
+        bannerGradient: dto.banner_gradient,
+      },
+    });
+  }
+
+  @Delete(':circleId')
+  @HttpCode(204)
+  async remove(
+    @Param('circleId') circleId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.circles.remove(circleId, user.userId);
   }
 
   @Patch(':circleId/sharing')

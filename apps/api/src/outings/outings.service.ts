@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -68,6 +69,65 @@ export class OutingsService {
       include: OUTING_INCLUDE,
     });
     return rows.map((r) => this.toDto(r));
+  }
+
+  /**
+   * Plan a watch party: create an outing for a circle + movie, seeded with the
+   * proposed theater/night options the group will vote on. When the caller
+   * supplies no options, sensible defaults are used so voting works immediately.
+   */
+  async create(
+    circleId: string,
+    userId: string,
+    input: {
+      movieTmdbId: number;
+      ticketsOnSaleDate?: string | null;
+      theaterOptions?: string[];
+      nightOptions?: string[];
+    },
+  ): Promise<OutingDto> {
+    await this.assertMember(circleId, userId);
+
+    const theaters = (input.theaterOptions?.length
+      ? input.theaterOptions
+      : ['AMC / Local IMAX', 'Regal / Cineplex']
+    )
+      .map((n) => n.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    const nights = (input.nightOptions?.length
+      ? input.nightOptions
+      : ['Opening Friday', 'Saturday Evening']
+    )
+      .map((n) => n.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    const outing = await this.prisma.outing.create({
+      data: {
+        circleId,
+        movieTmdbId: input.movieTmdbId,
+        status: OutingStatus.Planned,
+        ticketsOnSaleDate: input.ticketsOnSaleDate ?? null,
+        theaterVotes: {
+          create: theaters.map((name, position) => ({
+            optionId: randomUUID(),
+            name,
+            position,
+            voterIds: [],
+          })),
+        },
+        nightVotes: {
+          create: nights.map((label, position) => ({
+            optionId: randomUUID(),
+            label,
+            position,
+            voterIds: [],
+          })),
+        },
+      },
+    });
+    return this.get(outing.id);
   }
 
   async setRsvp(

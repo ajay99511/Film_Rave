@@ -20,6 +20,17 @@ export class MoviesController {
     return this.movies.search(q ?? '');
   }
 
+  @Get('popular')
+  popular(@Query('limit') limit?: string): Promise<MovieDto[]> {
+    const n = Number(limit);
+    return this.movies.popular(Number.isFinite(n) && n > 0 ? n : 25);
+  }
+
+  @Get('upcoming')
+  upcoming(): Promise<MovieDto[]> {
+    return this.movies.upcoming();
+  }
+
   @Get(':tmdbId')
   get(@Param('tmdbId', ParseIntPipe) tmdbId: number): Promise<MovieDto> {
     return this.movies.getOrFetch(tmdbId);

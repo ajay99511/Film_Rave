@@ -7,7 +7,17 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsEnum, IsInt, IsString, Max, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 import { RsvpStatus, type OutingDto } from '@filmrave/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CurrentUser, type AuthUser } from '../common/current-user.decorator.js';
@@ -30,6 +40,31 @@ class HypeDto {
   score!: number;
 }
 
+class CreateOutingDto {
+  @IsString()
+  circle_id!: string;
+
+  @IsInt()
+  movie_tmdb_id!: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'tickets_on_sale_date must be YYYY-MM-DD' })
+  tickets_on_sale_date?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(10)
+  theater_options?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(10)
+  night_options?: string[];
+}
+
 @UseGuards(JwtAuthGuard)
 @Controller('outings')
 export class OutingsController {
@@ -41,6 +76,19 @@ export class OutingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<OutingDto[]> {
     return this.outings.listForCircle(circleId, user.userId);
+  }
+
+  @Post()
+  create(
+    @Body() dto: CreateOutingDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<OutingDto> {
+    return this.outings.create(dto.circle_id, user.userId, {
+      movieTmdbId: dto.movie_tmdb_id,
+      ticketsOnSaleDate: dto.tickets_on_sale_date ?? null,
+      theaterOptions: dto.theater_options,
+      nightOptions: dto.night_options,
+    });
   }
 
   @Post(':outingId/rsvp')
