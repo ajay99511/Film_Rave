@@ -12,7 +12,9 @@ import type { Database, TableName } from './schema';
 import { buildSeed } from './seed';
 
 const STORAGE_KEY = 'filmrave.local.db';
-const SCHEMA_VERSION = 1;
+// Bumped to 2 when identity moved from phone/OTP to Google (user row shape
+// changed), forcing a reseed of any older persisted demo store.
+const SCHEMA_VERSION = 2;
 
 interface Persisted {
   schema_version: number;

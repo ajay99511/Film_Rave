@@ -8,8 +8,8 @@
  *
  * Rows reuse the wire DTOs from `@filmrave/shared` wherever the stored shape and
  * the transmitted shape are identical (ratings, watchlist, votes, …). Where the
- * server keeps extra columns that never reach the client (a user's `phone`, an
- * OTP `code`), we extend the DTO with a storage-only type.
+ * server keeps extra columns that never reach the client (a user's `google_id`),
+ * we extend the DTO with a storage-only type.
  */
 import type {
   ChatMessageDto,
@@ -25,20 +25,25 @@ import type {
   WatchlistEntryDto,
 } from '@filmrave/shared';
 
-/** users — includes columns the API never serializes (phone). */
+/** users — identity comes from Google (email + google_id + optional picture). */
 export interface UserRow {
   user_id: string;
   display_name: string;
   handle: string;
   avatar_color: string | null;
-  phone: string;
+  avatar_url: string | null;
+  email: string;
+  google_id: string;
 }
 
-/** circles */
+/** circles — identity fields optional so older persisted stores still load. */
 export interface CircleRow {
   group_id: string;
   name: string;
   description: string;
+  genre_focus?: string;
+  privacy?: 'private' | 'public';
+  banner_gradient?: string;
   created_at: string;
 }
 
@@ -86,15 +91,6 @@ export type ChatMessageRow = ChatMessageDto;
 /** notifications */
 export type NotificationRow = NotificationDto;
 
-/** otp_challenges — short-lived; the code is the storage-only secret. */
-export interface OtpChallengeRow {
-  challenge_id: string;
-  phone: string;
-  code: string;
-  expires_at: string;
-  consumed: boolean;
-}
-
 /**
  * The whole database. Table name → row type. Keep keys identical to the eventual
  * SQL table names so a migration is a rename-free copy.
@@ -114,7 +110,6 @@ export interface Database {
   outing_rsvps: OutingRsvpRow[];
   chat_messages: ChatMessageRow[];
   notifications: NotificationRow[];
-  otp_challenges: OtpChallengeRow[];
 }
 
 export type TableName = keyof Database;

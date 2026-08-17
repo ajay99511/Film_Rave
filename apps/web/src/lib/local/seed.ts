@@ -13,15 +13,30 @@ const daysAgo = (d: number) => hoursAgo(d * 24);
 
 // --- users ---------------------------------------------------------------
 
+const seedUser = (
+  user_id: string,
+  display_name: string,
+  handle: string,
+  avatar_color: string,
+): UserRow => ({
+  user_id,
+  display_name,
+  handle,
+  avatar_color,
+  avatar_url: null,
+  email: `${handle}@example.com`,
+  google_id: `demo-${user_id}`,
+});
+
 export const SEED_USERS: UserRow[] = [
-  { user_id: 'u1', display_name: 'Ajay', handle: 'ajay', avatar_color: 'bg-blue-600', phone: '+15550000001' },
-  { user_id: 'u2', display_name: 'Sarah', handle: 'sarah', avatar_color: 'bg-emerald-600', phone: '+15550000002' },
-  { user_id: 'u3', display_name: 'Mike', handle: 'mike', avatar_color: 'bg-amber-600', phone: '+15550000003' },
-  { user_id: 'u4', display_name: 'Emma', handle: 'emma', avatar_color: 'bg-purple-600', phone: '+15550000004' },
-  { user_id: 'u5', display_name: 'David', handle: 'david', avatar_color: 'bg-rose-600', phone: '+15550000005' },
+  seedUser('u1', 'Ajay', 'ajay', 'bg-blue-600'),
+  seedUser('u2', 'Sarah', 'sarah', 'bg-emerald-600'),
+  seedUser('u3', 'Mike', 'mike', 'bg-amber-600'),
+  seedUser('u4', 'Emma', 'emma', 'bg-purple-600'),
+  seedUser('u5', 'David', 'david', 'bg-rose-600'),
 ];
 
-/** The default identity when signing in with the primary seed phone. */
+/** The identity used by the one-click demo sign-in in offline mode. */
 export const PRIMARY_USER_ID = 'u1';
 
 const CIRCLE_ID = 'circle-inner-five';
@@ -45,6 +60,9 @@ export function buildSeed(): Database {
         group_id: CIRCLE_ID,
         name: 'The Inner Five',
         description: 'The original crew — no bad takes allowed.',
+        genre_focus: 'Sci-Fi & Action',
+        privacy: 'private',
+        banner_gradient: 'from-orange-600 via-amber-600 to-red-600',
         created_at: daysAgo(120),
       },
     ],
@@ -136,6 +154,5 @@ export function buildSeed(): Database {
       { id: 'ntf-3', user_id: 'u1', type: 'rating_imported', title: 'Import complete', body: '1 rating imported from Letterboxd.', data: {}, read_at: daysAgo(1), created_at: daysAgo(1) },
     ],
 
-    otp_challenges: [],
   };
 }

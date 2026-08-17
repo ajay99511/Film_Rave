@@ -12,13 +12,12 @@ import type {
   AuthTokensDto,
   ChatMessageDto,
   CircleDto,
+  CirclePrivacy,
   FeedItemDto,
   FriendRelationshipDto,
   ImportResultDto,
   MovieDto,
   NotificationDto,
-  OtpRequestResultDto,
-  OtpVerifyResultDto,
   OutingDto,
   RatingDto,
   RatingSource,
@@ -27,14 +26,31 @@ import type {
   WatchlistEntryDto,
 } from '@filmrave/shared';
 
+/** Card/banner identity fields for a circle (all optional on create/update). */
+export interface CircleIdentityInput {
+  genre_focus?: string;
+  privacy?: CirclePrivacy;
+  banner_gradient?: string;
+}
+
+/** Partial edit for a circle. Any omitted field is left unchanged. */
+export interface CircleUpdateInput extends CircleIdentityInput {
+  name?: string;
+  description?: string;
+  member_ids?: string[];
+}
+
+/** Inputs for planning a watch-party outing. */
+export interface CreateOutingInput {
+  movie_tmdb_id: number;
+  tickets_on_sale_date?: string | null;
+  theater_options?: string[];
+  night_options?: string[];
+}
+
 export interface AuthApi {
-  requestOtp(phone: string): Promise<OtpRequestResultDto>;
-  verifyOtp(phone: string, code: string): Promise<OtpVerifyResultDto>;
-  completeProfile(
-    signupToken: string,
-    handle: string,
-    displayName: string,
-  ): Promise<AuthTokensDto>;
+  /** Sign in / sign up with a Google Identity Services ID token. */
+  google(idToken: string): Promise<AuthTokensDto>;
   me(): Promise<AppUserDto>;
 }
 
@@ -42,7 +58,14 @@ export interface CirclesApi {
   list(): Promise<CircleDto[]>;
   get(id: string): Promise<CircleDto>;
   members(id: string): Promise<AppUserDto[]>;
-  create(name: string, description: string, memberIds: string[]): Promise<CircleDto>;
+  create(
+    name: string,
+    description: string,
+    memberIds: string[],
+    identity?: CircleIdentityInput,
+  ): Promise<CircleDto>;
+  update(id: string, patch: CircleUpdateInput): Promise<CircleDto>;
+  remove(id: string): Promise<void>;
   updateSharing(
     id: string,
     ratingsShared: RatingsShared,
@@ -67,6 +90,10 @@ export interface RatingsApi {
 export interface MoviesApi {
   search(q: string): Promise<MovieDto[]>;
   get(tmdbId: number): Promise<MovieDto>;
+  /** Popular titles for the TMDB browse surface. */
+  popular(limit?: number): Promise<MovieDto[]>;
+  /** Upcoming theatrical releases. */
+  upcoming(): Promise<MovieDto[]>;
 }
 
 export interface WatchlistApi {
@@ -77,6 +104,7 @@ export interface WatchlistApi {
 
 export interface OutingsApi {
   list(circleId: string): Promise<OutingDto[]>;
+  create(circleId: string, input: CreateOutingInput): Promise<OutingDto>;
   rsvp(outingId: string, status: RsvpStatus): Promise<OutingDto>;
   voteTheater(outingId: string, optionId: string): Promise<OutingDto>;
   voteNight(outingId: string, optionId: string): Promise<OutingDto>;

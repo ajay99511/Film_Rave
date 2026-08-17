@@ -143,6 +143,21 @@ export function catalogSearch(query: string): MovieDto[] {
   return CATALOG.filter((m) => m.title.toLowerCase().includes(q));
 }
 
+/** Local stand-in for TMDB "popular": newest releases first, capped at `limit`. */
+export function catalogPopular(limit = 25): MovieDto[] {
+  return [...CATALOG]
+    .sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))
+    .slice(0, limit);
+}
+
+/** Local stand-in for TMDB "upcoming": releases dated in the future. */
+export function catalogUpcoming(): MovieDto[] {
+  const today = new Date().toISOString().slice(0, 10);
+  return [...CATALOG]
+    .filter((m) => (m.release_date ?? '') >= today)
+    .sort((a, b) => (a.release_date ?? '').localeCompare(b.release_date ?? ''));
+}
+
 /** Loose title match used by the CSV importer (ignores punctuation/case). */
 function normalizeTitle(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

@@ -14,8 +14,6 @@ import type {
   ImportResultDto,
   MovieDto,
   NotificationDto,
-  OtpRequestResultDto,
-  OtpVerifyResultDto,
   OutingDto,
   RatingDto,
   RatingSource,
@@ -118,23 +116,11 @@ const chat: ChatTransport = {
 
 export const httpBackend: Backend = {
   auth: {
-    requestOtp: (phone) =>
-      api<OtpRequestResultDto>('/auth/otp/request', {
+    google: (id_token) =>
+      api<AuthTokensDto>('/auth/google', {
         method: 'POST',
         auth: false,
-        body: JSON.stringify({ phone }),
-      }),
-    verifyOtp: (phone, code) =>
-      api<OtpVerifyResultDto>('/auth/otp/verify', {
-        method: 'POST',
-        auth: false,
-        body: JSON.stringify({ phone, code }),
-      }),
-    completeProfile: (signup_token, handle, displayName) =>
-      api<AuthTokensDto>('/auth/complete-profile', {
-        method: 'POST',
-        auth: false,
-        body: JSON.stringify({ signup_token, handle, displayName }),
+        body: JSON.stringify({ id_token }),
       }),
     me: () => api<AppUserDto>('/auth/me'),
   },
@@ -143,11 +129,17 @@ export const httpBackend: Backend = {
     list: () => api<CircleDto[]>('/circles'),
     get: (id) => api<CircleDto>(`/circles/${id}`),
     members: (id) => api<AppUserDto[]>(`/circles/${id}/members`),
-    create: (name, description, member_ids) =>
+    create: (name, description, member_ids, identity = {}) =>
       api<CircleDto>('/circles', {
         method: 'POST',
-        body: JSON.stringify({ name, description, member_ids }),
+        body: JSON.stringify({ name, description, member_ids, ...identity }),
       }),
+    update: (id, patch) =>
+      api<CircleDto>(`/circles/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    remove: (id) => api<void>(`/circles/${id}`, { method: 'DELETE' }),
     updateSharing: (id, ratings_shared, shared_movie_ids = []) =>
       api<CircleDto>(`/circles/${id}/sharing`, {
         method: 'PATCH',
@@ -182,6 +174,8 @@ export const httpBackend: Backend = {
   movies: {
     search: (q) => api<MovieDto[]>(`/movies/search?q=${encodeURIComponent(q)}`),
     get: (tmdbId) => api<MovieDto>(`/movies/${tmdbId}`),
+    popular: (limit = 25) => api<MovieDto[]>(`/movies/popular?limit=${limit}`),
+    upcoming: () => api<MovieDto[]>('/movies/upcoming'),
   },
 
   watchlist: {
@@ -196,6 +190,11 @@ export const httpBackend: Backend = {
 
   outings: {
     list: (circleId) => api<OutingDto[]>(`/outings?circleId=${circleId}`),
+    create: (circleId, input) =>
+      api<OutingDto>('/outings', {
+        method: 'POST',
+        body: JSON.stringify({ circle_id: circleId, ...input }),
+      }),
     rsvp: (outingId, status: RsvpStatus) =>
       api<OutingDto>(`/outings/${outingId}/rsvp`, {
         method: 'POST',

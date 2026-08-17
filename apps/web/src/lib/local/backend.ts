@@ -24,7 +24,14 @@ import {
 } from '@filmrave/shared';
 import { ApiError, session } from '../client-core';
 import type { Backend, ChatTransport } from '../backend/types';
-import { catalogGet, catalogMatchByTitle, catalogSearch } from './catalog';
+import {
+  catalogGet,
+  catalogMatchByTitle,
+  catalogPopular,
+  catalogSearch,
+  catalogUpcoming,
+} from './catalog';
+import { PRIMARY_USER_ID } from './seed';
 import { publishMessage, subscribeMessages } from './chat-bus';
 import { parseRatingsCsv } from './csv';
 import { issueToken, newId, userIdFromToken } from './ids';
@@ -49,6 +56,7 @@ function toAppUser(u: UserRow): AppUserDto {
     display_name: u.display_name,
     handle: u.handle,
     avatar_color: u.avatar_color,
+    avatar_url: u.avatar_url,
   };
 }
 
@@ -80,6 +88,8 @@ function toMemberDto(m: CircleMemberRow): CircleMemberDto {
   return dto;
 }
 
+const DEFAULT_BANNER = 'from-orange-600 via-amber-600 to-red-600';
+
 function toCircleDto(groupId: string): CircleDto {
   const circle = table('circles').find((c) => c.group_id === groupId);
   if (!circle) throw new ApiError(404, 'Circle not found');
@@ -87,6 +97,9 @@ function toCircleDto(groupId: string): CircleDto {
     group_id: circle.group_id,
     name: circle.name,
     description: circle.description,
+    genre_focus: circle.genre_focus ?? 'General / All Genres',
+    privacy: circle.privacy ?? 'private',
+    banner_gradient: circle.banner_gradient ?? DEFAULT_BANNER,
     members: membersOf(groupId).map(toMemberDto),
   };
 }
@@ -194,51 +207,12 @@ const chat: ChatTransport = {
 
 export const localBackend: Backend = {
   auth: {
-    async requestOtp(phone) {
-      const code = String(Math.floor(100000 + Math.random() * 900000));
-      const challenge_id = newId('otp');
-      const expires_at = new Date(Date.now() + 10 * 60_000).toISOString();
-      mutate((database) => {
-        database.otp_challenges.push({ challenge_id, phone, code, expires_at, consumed: false });
-      });
-      // `dev_code` is surfaced by the login screen — no SMS provider locally.
-      return { challenge_id, expires_at, dev_code: code };
-    },
-
-    async verifyOtp(phone, code) {
-      const challenge = [...table('otp_challenges')]
-        .reverse()
-        .find((c) => c.phone === phone && !c.consumed);
-      if (!challenge) throw new ApiError(400, 'Request a code first');
-      if (challenge.code !== code) throw new ApiError(400, 'Invalid code');
-      if (new Date(challenge.expires_at).getTime() < Date.now())
-        throw new ApiError(400, 'Code expired');
-
-      mutate((database) => {
-        const row = database.otp_challenges.find((c) => c.challenge_id === challenge.challenge_id);
-        if (row) row.consumed = true;
-      });
-
-      const user = table('users').find((u) => u.phone === phone);
-      if (user) return { status: 'authenticated', ...tokensFor(user) };
-      return { status: 'needs_profile', signup_token: `signup.${phone}` };
-    },
-
-    async completeProfile(signupToken, handle, displayName) {
-      const phone = signupToken.startsWith('signup.') ? signupToken.slice('signup.'.length) : '';
-      if (!phone) throw new ApiError(400, 'Invalid signup token');
-      const cleanHandle = handle.trim().toLowerCase();
-      if (table('users').some((u) => u.handle === cleanHandle))
-        throw new ApiError(409, 'Handle already taken');
-
-      const user: UserRow = {
-        user_id: newId('usr'),
-        display_name: displayName.trim() || cleanHandle,
-        handle: cleanHandle,
-        avatar_color: null,
-        phone,
-      };
-      mutate((database) => database.users.push(user));
+    // Demo mode has no real Google; sign in as the primary seeded user so the
+    // offline app is usable with one click.
+    async google() {
+      const user =
+        table('users').find((u) => u.user_id === PRIMARY_USER_ID) ?? table('users')[0];
+      if (!user) throw new ApiError(500, 'No demo user is seeded');
       return tokensFor(user);
     },
 
@@ -271,7 +245,7 @@ export const localBackend: Backend = {
         .map(toAppUser);
     },
 
-    async create(name, description, memberIds) {
+    async create(name, description, memberIds, identity = {}) {
       const me = requireUserId();
       const group_id = newId('circle');
       mutate((database) => {
@@ -279,6 +253,9 @@ export const localBackend: Backend = {
           group_id,
           name: name.trim(),
           description,
+          genre_focus: identity.genre_focus ?? 'General / All Genres',
+          privacy: identity.privacy ?? 'private',
+          banner_gradient: identity.banner_gradient ?? DEFAULT_BANNER,
           created_at: new Date().toISOString(),
         });
         database.circle_members.push({
@@ -298,6 +275,66 @@ export const localBackend: Backend = {
         }
       });
       return toCircleDto(group_id);
+    },
+
+    async update(id, patch) {
+      const me = requireUserId();
+      const admin = membersOf(id).find((m) => m.user_id === me);
+      if (!admin || admin.role !== 'admin') {
+        throw new ApiError(403, 'only a circle admin can do this');
+      }
+      mutate((database) => {
+        const circle = database.circles.find((c) => c.group_id === id);
+        if (!circle) throw new ApiError(404, 'Circle not found');
+        if (patch.name !== undefined) circle.name = patch.name.trim();
+        if (patch.description !== undefined) circle.description = patch.description;
+        if (patch.genre_focus !== undefined) circle.genre_focus = patch.genre_focus;
+        if (patch.privacy !== undefined) circle.privacy = patch.privacy;
+        if (patch.banner_gradient !== undefined) circle.banner_gradient = patch.banner_gradient;
+
+        if (patch.member_ids) {
+          const desired = new Set([...patch.member_ids, me]);
+          database.circle_members = database.circle_members.filter(
+            (m) => m.group_id !== id || desired.has(m.user_id),
+          );
+          for (const uid of desired) {
+            const exists = database.circle_members.some(
+              (m) => m.group_id === id && m.user_id === uid,
+            );
+            if (!exists) {
+              database.circle_members.push({
+                group_id: id,
+                user_id: uid,
+                role: uid === me ? 'admin' : 'member',
+                ratings_shared: 'approved',
+              });
+            }
+          }
+        }
+      });
+      return toCircleDto(id);
+    },
+
+    async remove(id) {
+      const me = requireUserId();
+      const admin = membersOf(id).find((m) => m.user_id === me);
+      if (!admin || admin.role !== 'admin') {
+        throw new ApiError(403, 'only a circle admin can do this');
+      }
+      mutate((database) => {
+        const outingIds = new Set(
+          database.outings.filter((o) => o.group_id === id).map((o) => o.outing_id),
+        );
+        database.circles = database.circles.filter((c) => c.group_id !== id);
+        database.circle_members = database.circle_members.filter((m) => m.group_id !== id);
+        database.group_watches = database.group_watches.filter((w) => w.group_id !== id);
+        database.chat_messages = database.chat_messages.filter((m) => m.group_id !== id);
+        database.outings = database.outings.filter((o) => o.group_id !== id);
+        database.theater_votes = database.theater_votes.filter((v) => !outingIds.has(v.outing_id));
+        database.night_votes = database.night_votes.filter((v) => !outingIds.has(v.outing_id));
+        database.outing_hypes = database.outing_hypes.filter((h) => !outingIds.has(h.outing_id));
+        database.outing_rsvps = database.outing_rsvps.filter((r) => !outingIds.has(r.outing_id));
+      });
     },
 
     async updateSharing(id, ratingsShared, sharedMovieIds = []) {
@@ -446,6 +483,12 @@ export const localBackend: Backend = {
       if (!m) throw new ApiError(404, 'Movie not found');
       return m;
     },
+    async popular(limit = 25) {
+      return catalogPopular(limit);
+    },
+    async upcoming() {
+      return catalogUpcoming();
+    },
   },
 
   watchlist: {
@@ -483,6 +526,54 @@ export const localBackend: Backend = {
       return table('outings')
         .filter((o) => o.group_id === circleId)
         .map(toOutingDto);
+    },
+
+    async create(circleId, input) {
+      const me = requireUserId();
+      requireMembership(circleId, me);
+      const outing_id = newId('outing');
+      const theaters = (input.theater_options?.length
+        ? input.theater_options
+        : ['AMC / Local IMAX', 'Regal / Cineplex']
+      )
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .slice(0, 10);
+      const nights = (input.night_options?.length
+        ? input.night_options
+        : ['Opening Friday', 'Saturday Evening']
+      )
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .slice(0, 10);
+      mutate((database) => {
+        database.outings.push({
+          outing_id,
+          group_id: circleId,
+          movie_tmdb_id: input.movie_tmdb_id,
+          status: 'planned',
+          tickets_on_sale_date: input.tickets_on_sale_date ?? null,
+        });
+        theaters.forEach((name, position) => {
+          database.theater_votes.push({
+            outing_id,
+            option_id: newId('th'),
+            name,
+            position,
+            voter_ids: [],
+          });
+        });
+        nights.forEach((label, position) => {
+          database.night_votes.push({
+            outing_id,
+            option_id: newId('ni'),
+            label,
+            position,
+            voter_ids: [],
+          });
+        });
+      });
+      return toOutingDto(requireOuting(outing_id));
     },
 
     async rsvp(outingId, status) {
