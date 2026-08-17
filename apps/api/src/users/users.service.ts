@@ -37,12 +37,14 @@ export class UsersService {
     displayName: string;
     handle: string;
     avatarColor: string | null;
+    avatarUrl: string | null;
   }): AppUserDto {
     return {
       user_id: u.id,
       display_name: u.displayName,
       handle: u.handle,
       avatar_color: u.avatarColor,
+      avatar_url: u.avatarUrl,
     };
   }
 }

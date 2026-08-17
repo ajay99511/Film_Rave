@@ -1,25 +1,9 @@
-import {
-  ConflictException,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import * as argon2 from 'argon2';
-import type {
-  AppUserDto,
-  OtpRequestResultDto,
-  OtpVerifyResultDto,
-} from '@filmrave/shared';
+import { OAuth2Client } from 'google-auth-library';
+import type { AppUserDto } from '@filmrave/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
-import type {
-  CompleteProfileDto,
-  LoginDto,
-  OtpRequestDto,
-  OtpVerifyDto,
-  RegisterDto,
-} from './dto/auth.dto.js';
 
 export interface AuthResult {
   access_token: string;
@@ -32,11 +16,11 @@ interface Userish {
   handle: string;
   displayName: string;
   avatarColor: string | null;
+  avatarUrl: string | null;
 }
 
-const OTP_TTL_MS = 5 * 60 * 1000;
-const OTP_MAX_ATTEMPTS = 5;
-// Deterministic palette so avatars are stable/colorful without a picker.
+// Deterministic palette so avatars are stable/colorful without a picker (used as
+// a fallback when Google provides no picture).
 const AVATAR_COLORS = [
   'bg-blue-600',
   'bg-emerald-600',
@@ -49,15 +33,16 @@ const AVATAR_COLORS = [
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly google: OAuth2Client;
+  private readonly googleClientId: string | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-  ) {}
-
-  private get isProd(): boolean {
-    return this.config.get<string>('NODE_ENV') === 'production';
+  ) {
+    this.googleClientId = this.config.get<string>('GOOGLE_CLIENT_ID');
+    this.google = new OAuth2Client(this.googleClientId);
   }
 
   /** Full profile for session restore (GET /auth/me). */
@@ -66,71 +51,63 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('user no longer exists');
     }
-    return {
-      user_id: user.id,
-      display_name: user.displayName,
-      handle: user.handle,
-      avatar_color: user.avatarColor,
-    };
+    return this.toDto(user);
   }
 
   /**
-   * Step 1: issue a one-time code for a phone. In non-prod the code is logged
-   * and returned as `dev_code` so local testing needs no SMS provider.
+   * Sign in with Google. Verifies the ID token against our client id, then finds
+   * the user by Google subject (falling back to email to link a pre-existing
+   * account) or provisions a new one with an auto-generated unique handle.
    */
-  async requestOtp(dto: OtpRequestDto): Promise<OtpRequestResultDto> {
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-    const challenge = await this.prisma.otpChallenge.create({
-      data: { phone: dto.phone, codeHash: await argon2.hash(code), expiresAt },
-    });
-    await this.sendSms(dto.phone, code);
-    return {
-      challenge_id: challenge.id,
-      expires_at: expiresAt.toISOString(),
-      ...(this.isProd ? {} : { dev_code: code }),
-    };
-  }
-
-  /**
-   * Step 2: verify the code. Known phone → tokens. New phone → a short-lived
-   * signup token the client exchanges at completeProfile().
-   */
-  async verifyOtp(dto: OtpVerifyDto): Promise<OtpVerifyResultDto> {
-    const challenge = await this.prisma.otpChallenge.findFirst({
-      where: { phone: dto.phone, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!challenge) {
-      throw new UnauthorizedException('no active code; request a new one');
+  async googleSignIn(idToken: string): Promise<AuthResult> {
+    if (!this.googleClientId) {
+      throw new UnauthorizedException('Google sign-in is not configured');
     }
-    if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
-      throw new UnauthorizedException('too many attempts; request a new code');
-    }
-    const ok = await argon2.verify(challenge.codeHash, dto.code);
-    if (!ok) {
-      await this.prisma.otpChallenge.update({
-        where: { id: challenge.id },
-        data: { attempts: { increment: 1 } },
+    let payload;
+    try {
+      const ticket = await this.google.verifyIdToken({
+        idToken,
+        audience: this.googleClientId,
       });
-      throw new UnauthorizedException('invalid code');
+      payload = ticket.getPayload();
+    } catch {
+      throw new UnauthorizedException('invalid Google token');
     }
-    await this.prisma.otpChallenge.update({
-      where: { id: challenge.id },
-      data: { consumedAt: new Date() },
+    if (!payload?.sub || !payload.email || !payload.email_verified) {
+      throw new UnauthorizedException('Google account is missing a verified email');
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email.toLowerCase();
+    const displayName = payload.name?.trim() || email.split('@')[0];
+    const avatarUrl = payload.picture ?? null;
+
+    // Existing user: match on Google subject first, then link by email.
+    let user = await this.prisma.user.findFirst({
+      where: { OR: [{ googleId }, { email }] },
     });
 
-    const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone },
-    });
     if (user) {
-      return { status: 'authenticated', ...(await this.issue(user)) };
+      // Keep the linked account current (backfill googleId, refresh picture).
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { googleId, avatarUrl, email },
+      });
+    } else {
+      const handle = await this.uniqueHandle(email, displayName);
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          googleId,
+          displayName,
+          handle,
+          avatarUrl,
+          avatarColor: this.colorFor(handle),
+        },
+      });
     }
-    const signup_token = await this.jwt.signAsync(
-      { purpose: 'signup', phone: dto.phone },
-      { expiresIn: '15m' },
-    );
-    return { status: 'needs_profile', signup_token };
+
+    return this.issue(user);
   }
 
   /** Exchange a valid refresh token for a fresh token pair. */
@@ -149,80 +126,33 @@ export class AuthService {
     return this.issue(user);
   }
 
-  /** Step 3 (new users only): claim a handle, creating the account. */
-  async completeProfile(dto: CompleteProfileDto): Promise<AuthResult> {
-    let phone: string;
-    try {
-      const payload = await this.jwt.verifyAsync<{
-        purpose: string;
-        phone: string;
-      }>(dto.signup_token);
-      if (payload.purpose !== 'signup' || !payload.phone) {
-        throw new Error('bad token');
+  /** Derive a unique, URL-safe handle from the Google email/name. */
+  private async uniqueHandle(email: string, displayName: string): Promise<string> {
+    const base =
+      (email.split('@')[0] || displayName || 'user')
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '')
+        .slice(0, 18) || 'user';
+    const candidate = base.length >= 3 ? base : `${base}_user`.slice(0, 20);
+    if (!(await this.prisma.user.findUnique({ where: { handle: candidate } }))) {
+      return candidate;
+    }
+    // Collision: append a short numeric suffix until free.
+    for (let i = 0; i < 1000; i++) {
+      const suffix = String(Math.floor(Math.random() * 10000));
+      const withSuffix = `${candidate.slice(0, 20 - suffix.length)}${suffix}`;
+      if (!(await this.prisma.user.findUnique({ where: { handle: withSuffix } }))) {
+        return withSuffix;
       }
-      phone = payload.phone;
-    } catch {
-      throw new UnauthorizedException('invalid or expired signup token');
     }
-    const clash = await this.prisma.user.findFirst({
-      where: { OR: [{ phone }, { handle: dto.handle }] },
-    });
-    if (clash) {
-      throw new ConflictException('phone or handle already in use');
-    }
-    const user = await this.prisma.user.create({
-      data: {
-        phone,
-        handle: dto.handle,
-        displayName: dto.displayName,
-        avatarColor: this.colorFor(dto.handle),
-      },
-    });
-    return this.issue(user);
+    // Practically unreachable; fall back to a cuid-ish suffix.
+    return `${candidate.slice(0, 12)}${Date.now().toString(36).slice(-6)}`;
   }
 
   private colorFor(seed: string): string {
     let h = 0;
     for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return AVATAR_COLORS[h % AVATAR_COLORS.length];
-  }
-
-  private async sendSms(phone: string, code: string): Promise<void> {
-    // Local/dev stub. Swap for Twilio/MessageBird in production.
-    this.logger.log(`[SMS] OTP for ${phone}: ${code}`);
-  }
-
-  async register(dto: RegisterDto): Promise<AuthResult> {
-    const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, { handle: dto.handle }] },
-    });
-    if (existing) {
-      throw new ConflictException('email or handle already in use');
-    }
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        handle: dto.handle,
-        displayName: dto.displayName,
-        passwordHash: await argon2.hash(dto.password),
-        avatarColor: this.colorFor(dto.handle),
-      },
-    });
-    return this.issue(user);
-  }
-
-  async login(dto: LoginDto): Promise<AuthResult> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (!user?.passwordHash) {
-      throw new UnauthorizedException('invalid credentials');
-    }
-    const ok = await argon2.verify(user.passwordHash, dto.password);
-    if (!ok) {
-      throw new UnauthorizedException('invalid credentials');
-    }
-    return this.issue(user);
   }
 
   private async issue(user: Userish): Promise<AuthResult> {
@@ -235,15 +165,16 @@ export class AuthService {
         expiresIn: this.config.get('JWT_REFRESH_TTL') ?? '30d',
       }),
     ]);
+    return { access_token, refresh_token, user: this.toDto(user) };
+  }
+
+  private toDto(u: Userish): AppUserDto {
     return {
-      access_token,
-      refresh_token,
-      user: {
-        user_id: user.id,
-        display_name: user.displayName,
-        handle: user.handle,
-        avatar_color: user.avatarColor,
-      },
+      user_id: u.id,
+      display_name: u.displayName,
+      handle: u.handle,
+      avatar_color: u.avatarColor,
+      avatar_url: u.avatarUrl,
     };
   }
 }

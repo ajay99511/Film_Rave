@@ -1,18 +1,8 @@
 import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
-import type {
-  AppUserDto,
-  OtpRequestResultDto,
-  OtpVerifyResultDto,
-} from '@filmrave/shared';
+import { Throttle } from '@nestjs/throttler';
+import type { AppUserDto } from '@filmrave/shared';
 import { AuthService, type AuthResult } from './auth.service.js';
-import {
-  CompleteProfileDto,
-  LoginDto,
-  OtpRequestDto,
-  OtpVerifyDto,
-  RefreshDto,
-  RegisterDto,
-} from './dto/auth.dto.js';
+import { GoogleAuthDto, RefreshDto } from './dto/auth.dto.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { CurrentUser, type AuthUser } from '../common/current-user.decorator.js';
 
@@ -20,37 +10,18 @@ import { CurrentUser, type AuthUser } from '../common/current-user.decorator.js'
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Post('otp/request')
+  // Sign in / sign up with a Google ID token. Modest per-IP ceiling.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('google')
   @HttpCode(200)
-  requestOtp(@Body() dto: OtpRequestDto): Promise<OtpRequestResultDto> {
-    return this.auth.requestOtp(dto);
-  }
-
-  @Post('otp/verify')
-  @HttpCode(200)
-  verifyOtp(@Body() dto: OtpVerifyDto): Promise<OtpVerifyResultDto> {
-    return this.auth.verifyOtp(dto);
-  }
-
-  @Post('complete-profile')
-  completeProfile(@Body() dto: CompleteProfileDto): Promise<AuthResult> {
-    return this.auth.completeProfile(dto);
+  google(@Body() dto: GoogleAuthDto): Promise<AuthResult> {
+    return this.auth.googleSignIn(dto.id_token);
   }
 
   @Post('refresh')
   @HttpCode(200)
   refresh(@Body() dto: RefreshDto): Promise<AuthResult> {
     return this.auth.refresh(dto.refresh_token);
-  }
-
-  @Post('register')
-  register(@Body() dto: RegisterDto): Promise<AuthResult> {
-    return this.auth.register(dto);
-  }
-
-  @Post('login')
-  login(@Body() dto: LoginDto): Promise<AuthResult> {
-    return this.auth.login(dto);
   }
 
   @UseGuards(JwtAuthGuard)

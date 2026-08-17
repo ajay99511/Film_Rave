@@ -12,7 +12,6 @@
       "@prisma/client",
       "@prisma/engines",
       "prisma",
-      "argon2",
       "esbuild",
       "sharp",
       "unrs-resolver"
