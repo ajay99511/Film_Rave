@@ -1,0 +1,27 @@
+# FilmRave CS (Client/Server) Code Owners
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Owner: Ajay Elika <ajayelika99511@gmail.com>
+
+# Global owner
+*       @ajay99511
+
+# Security-sensitive files
+SECURITY.md             @ajay99511
+LICENSE                 @ajay99511
+.github/CODEOWNERS      @ajay99511
+
+# Monorepo config
+package.json            @ajay99511
+pnpm-lock.yaml          @ajay99511
+pnpm-workspace.yaml     @ajay99511
+docker-compose.yml      @ajay99511
+
+# API server
+apps/api/               @ajay99511
+
+# Web client
+apps/web/               @ajay99511
+
+# Shared contract
+packages/shared/        @ajay99511

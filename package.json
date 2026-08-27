@@ -1,6 +1,7 @@
 {
   "name": "filmrave",
   "private": true,
+  "author": "Ajay Elika <ajayelika99511@gmail.com> (https://github.com/ajay99511)",
   "version": "0.1.0",
   "description": "FilmRave client-server monorepo: owned NestJS API + Next.js web client, sharing a typed contract with the Flutter app.",
   "packageManager": "pnpm@10.32.1",
