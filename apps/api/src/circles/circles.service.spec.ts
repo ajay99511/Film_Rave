@@ -73,3 +73,65 @@ describe('CirclesService.groupAverage', () => {
     expect(group_average).toBe(9);
   });
 });
+
+describe('CirclesService.feed member_ratings', () => {
+  function makeFeedService() {
+    const membersWithUser = [
+      {
+        userId: 'ada',
+        ratingsShared: 'approved',
+        sharedMovieIds: [],
+        user: { id: 'ada', displayName: 'Ada', avatarUrl: null },
+      },
+      {
+        userId: 'finn',
+        ratingsShared: 'none',
+        sharedMovieIds: [],
+        user: { id: 'finn', displayName: 'Finn', avatarUrl: null },
+      },
+      {
+        userId: 'zoe',
+        ratingsShared: 'approved',
+        sharedMovieIds: [],
+        user: { id: 'zoe', displayName: 'Zoe', avatarUrl: null },
+      },
+    ];
+    const feedRatings = [
+      { userId: 'ada', movieTmdbId: 550, score: 9, ratedAt: new Date(), source: 'app' },
+      { userId: 'finn', movieTmdbId: 550, score: 6, ratedAt: new Date(), source: 'app' },
+      { userId: 'zoe', movieTmdbId: 550, score: 4, ratedAt: new Date(), source: 'app' },
+    ];
+    const prisma = {
+      circleMember: { findMany: vi.fn().mockResolvedValue(membersWithUser) },
+      rating: { findMany: vi.fn().mockResolvedValue(feedRatings) },
+      groupWatch: { findMany: vi.fn().mockResolvedValue([]) },
+      movie: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ tmdbId: 550, title: 'Fight Club', releaseDate: '1999-10-15', overview: null, posterUrl: null, runtime: null, year: 1999 }]),
+      },
+      chatMessage: { groupBy: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+    return new CirclesService(prisma);
+  }
+
+  it('excludes the requester and unshared ratings, sorted highest first', async () => {
+    const service = makeFeedService();
+    const feed = await service.feed('c1', 'ada');
+    const item = feed.find((f) => f.movie.tmdb_id === 550)!;
+    // Ada is the requester (excluded, shown as my_rating instead); Finn's
+    // rating is 'none' (excluded); only Zoe's shared rating remains.
+    expect(item.my_rating).toBe(9);
+    expect(item.member_ratings).toEqual([
+      { user_id: 'zoe', display_name: 'Zoe', avatar_url: null, score: 4 },
+    ]);
+  });
+
+  it("shows both other members' shared ratings, highest first", async () => {
+    const service = makeFeedService();
+    const feed = await service.feed('c1', 'finn');
+    const item = feed.find((f) => f.movie.tmdb_id === 550)!;
+    expect(item.member_ratings.map((r) => r.user_id)).toEqual(['ada', 'zoe']);
+    expect(item.member_ratings.map((r) => r.score)).toEqual([9, 4]);
+  });
+});

@@ -184,6 +184,16 @@ export interface GroupWatchDto {
   watched_date: string; // YYYY-MM-DD
 }
 
+/** One member's rating of a movie, for the friends'-ratings breakdown on a
+ * feed card — already visibility-filtered server-side, never includes the
+ * requester's own rating (shown separately as `my_rating`). */
+export interface MemberRatingDto {
+  user_id: string;
+  display_name: string;
+  avatar_url?: string | null;
+  score: number;
+}
+
 /** One card in a circle's Group Feed: a movie plus circle-scoped aggregates. */
 export interface FeedItemDto {
   movie: MovieDto;
@@ -192,6 +202,10 @@ export interface FeedItemDto {
   my_rating: number | null;
   comment_count: number;
   co_watched: boolean;
+  /** Sorted highest score first. The friend-group-scale recommendation
+   * signal — e.g. "Priya 9 · Arjun 4" — meant to be the card's most
+   * prominent element. */
+  member_ratings: MemberRatingDto[];
 }
 
 export interface ImportResultDto {

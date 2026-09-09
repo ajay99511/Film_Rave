@@ -9,8 +9,14 @@ export function MovieCard({
   item: FeedItemDto;
   onOpen: () => void;
 }) {
-  const { movie, group_average, shared_rated_count, my_rating, comment_count } =
-    item;
+  const {
+    movie,
+    group_average,
+    shared_rated_count,
+    my_rating,
+    comment_count,
+    member_ratings,
+  } = item;
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -50,9 +56,24 @@ export function MovieCard({
       </div>
       <div className="p-5">
         {movie.overview && (
-          <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-6 line-clamp-3">
+          <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-3 line-clamp-3">
             {movie.overview}
           </p>
+        )}
+        {/* Friends' ratings — the friend-group-scale recommendation signal:
+            "Priya 9 · Arjun 4" beats a bare average. Most prominent element
+            on the card in a circle context, per the product's own framing. */}
+        {member_ratings.length > 0 && (
+          <div className="mb-6 flex flex-wrap gap-1.5">
+            {member_ratings.map((r) => (
+              <span
+                key={r.user_id}
+                className="inline-flex items-center gap-1 rounded-full bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/30 px-2.5 py-1 text-xs font-bold text-orange-700 dark:text-orange-400"
+              >
+                {r.display_name} {r.score}
+              </span>
+            ))}
+          </div>
         )}
         <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-4">
           <div className="flex items-center gap-6">

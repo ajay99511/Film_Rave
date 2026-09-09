@@ -273,6 +273,7 @@ export class CirclesService {
   async feed(circleId: string, requesterId: string): Promise<FeedItemDto[]> {
     const members = await this.prisma.circleMember.findMany({
       where: { circleId },
+      include: { user: true },
     });
     if (!members.some((m) => m.userId === requesterId)) {
       throw new ForbiddenException('not a member of this circle');
@@ -339,6 +340,19 @@ export class CirclesService {
             title: `Movie #${tmdbId}`,
             release_date: '',
           };
+      const memberRatings: FeedItemDto['member_ratings'] = shared
+        .filter((r) => r.userId !== requesterId)
+        .map((r) => {
+          const user = memberByUser.get(r.userId)!.user;
+          return {
+            user_id: r.userId,
+            display_name: user.displayName,
+            avatar_url: user.avatarUrl,
+            score: r.score,
+          };
+        })
+        .sort((a, b) => b.score - a.score);
+
       return {
         movie,
         group_average: shared.length
@@ -348,6 +362,7 @@ export class CirclesService {
         my_rating: mine?.score ?? null,
         comment_count: commentCount.get(tmdbId) ?? 0,
         co_watched: coWatched.has(tmdbId),
+        member_ratings: memberRatings,
       };
     });
 

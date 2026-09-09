@@ -131,6 +131,30 @@ function groupAverageFor(groupId: string, tmdbId: number) {
   return { shared_rated_count: count, group_average };
 }
 
+/** Friends'-ratings breakdown for a movie card, excluding the requester's own
+ * rating (shown separately as `my_rating`). Sorted highest score first. */
+function memberRatingsBreakdown(
+  groupId: string,
+  tmdbId: number,
+  excludeUserId: string,
+): FeedItemDto['member_ratings'] {
+  return memberRatingsForMovie(groupId, tmdbId)
+    .filter(
+      ({ rating, member }) =>
+        rating.user_id !== excludeUserId && isRatingShared(rating, member),
+    )
+    .map(({ rating }) => {
+      const user = table('users').find((u) => u.user_id === rating.user_id);
+      return {
+        user_id: rating.user_id,
+        display_name: user?.display_name ?? 'Member',
+        avatar_url: user?.avatar_url ?? null,
+        score: rating.score,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
 // --- outing assembly (mirrors OutingsService) ----------------------------
 
 function toOutingDto(o: OutingRow): OutingDto {
@@ -388,6 +412,7 @@ export const localBackend: Backend = {
           my_rating: mine?.score ?? null,
           comment_count,
           co_watched: coWatched.has(tmdbId),
+          member_ratings: memberRatingsBreakdown(id, tmdbId, me),
         });
       }
       // Most-agreed first (shared count, then average), nulls last.
