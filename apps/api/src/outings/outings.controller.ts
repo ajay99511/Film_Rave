@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -125,5 +126,32 @@ export class OutingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<OutingDto> {
     return this.outings.setHype(outingId, user.userId, dto.score);
+  }
+
+  /** Freeze guest writes on the public outing page. Admin-only. */
+  @Post(':outingId/lock')
+  lock(
+    @Param('outingId') outingId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<OutingDto> {
+    return this.outings.lock(outingId, user.userId);
+  }
+
+  @Post(':outingId/unlock')
+  unlock(
+    @Param('outingId') outingId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<OutingDto> {
+    return this.outings.unlock(outingId, user.userId);
+  }
+
+  /** Best-effort funnel instrumentation — see OutingsService.recordLinkShared. */
+  @Post(':outingId/link-shared')
+  @HttpCode(204)
+  async linkShared(
+    @Param('outingId') outingId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.outings.recordLinkShared(outingId, user.userId);
   }
 }

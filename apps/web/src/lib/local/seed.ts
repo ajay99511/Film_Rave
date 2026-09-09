@@ -112,8 +112,8 @@ export function buildSeed(): Database {
     ],
 
     outings: [
-      { outing_id: 'outing-deadpool', group_id: CIRCLE_ID, movie_tmdb_id: DEADPOOL, status: 'planned', tickets_on_sale_date: daysAgo(-7).slice(0, 10) },
-      { outing_id: 'outing-alien', group_id: CIRCLE_ID, movie_tmdb_id: ALIEN, status: 'planned', tickets_on_sale_date: null },
+      { outing_id: 'outing-deadpool', group_id: CIRCLE_ID, movie_tmdb_id: DEADPOOL, status: 'planned', tickets_on_sale_date: daysAgo(-7).slice(0, 10), slug: 'deadpool-demo-night', locked_at: null },
+      { outing_id: 'outing-alien', group_id: CIRCLE_ID, movie_tmdb_id: ALIEN, status: 'planned', tickets_on_sale_date: null, slug: 'alien-demo-night', locked_at: null },
     ],
 
     theater_votes: [
@@ -142,6 +142,8 @@ export function buildSeed(): Database {
       { outing_id: 'outing-alien', user_id: 'u1', status: 'going' },
       { outing_id: 'outing-alien', user_id: 'u4', status: 'going' },
     ],
+
+    guest_rsvps: [],
 
     chat_messages: [
       { message_id: 'msg-1', group_id: CIRCLE_ID, movie_tmdb_id: DUNE, user_id: 'u3', body: 'The visual effects were completely mind-blowing. Especially the sandworm ride!', sent_at: daysAgo(2) },

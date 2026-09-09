@@ -51,6 +51,14 @@ enum OutingStatus {
   done
 }
 
+enum EventType {
+  outing_created
+  link_shared
+  guest_viewed
+  guest_rsvped
+  guest_converted
+}
+
 enum RsvpStatus {
   going
   maybe
@@ -84,6 +92,7 @@ model User {
   watchlist       WatchlistEntry[]
   rsvps           OutingRsvp[]
   outingHypes     OutingHype[]
+  claimedGuestRsvps GuestRsvp[]
   notifications   Notification[]
   friendshipsFrom Friendship[]     @relation("friendshipUser")
   friendshipsTo   Friendship[]     @relation("friendshipOther")
@@ -201,14 +210,63 @@ model Outing {
   movieTmdbId       Int          @map("movie_tmdb_id")
   status            OutingStatus @default(planned)
   ticketsOnSaleDate String?      @map("tickets_on_sale_date")
+  // Public, unguessable identifier for the guest-accessible outing page
+  // (/o/[slug]). Deliberately distinct from `id` so the internal cuid is
+  // never exposed in a shared URL.
+  slug     String    @unique
+  // Non-null freezes further *guest* writes (RSVP/vote). Member writes are
+  // unaffected — this is an abuse lever for the public surface only.
+  lockedAt DateTime? @map("locked_at")
 
   circle       Circle        @relation(fields: [circleId], references: [id], onDelete: Cascade)
   rsvps        OutingRsvp[]
   theaterVotes TheaterVote[]
   nightVotes   NightVote[]
   hypes        OutingHype[]
+  guestRsvps   GuestRsvp[]
 
   @@map("outings")
+}
+
+// An anonymous visitor's RSVP/vote on one outing's public page, identified by
+// an opaque `guestToken` (an httpOnly cookie value) rather than a User row.
+// Never a JWT/signed token — the row in this table *is* the identity, so it
+// is trivially revocable and cannot be mistaken for a real auth session.
+model GuestRsvp {
+  outingId    String     @map("outing_id")
+  guestToken  String     @unique @map("guest_token")
+  displayName String     @map("display_name")
+  status      RsvpStatus
+  // Mirrors NightVote's toggle-vote, kept as its own column rather than
+  // appended into NightVote.voterIds, which is implicitly typed elsewhere as
+  // real User ids.
+  votedNightOptionId String? @map("voted_night_option_id")
+  // Set once, when the guest signs in while still holding this cookie.
+  // Never implies circle membership or an OutingRsvp row — those require a
+  // separate, explicit join.
+  claimedByUserId String? @map("claimed_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  outing    Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  claimedBy User?  @relation(fields: [claimedByUserId], references: [id], onDelete: SetNull)
+
+  @@id([outingId, guestToken])
+  @@map("guest_rsvps")
+}
+
+// Minimal append-only funnel log for the guest-outing growth loop. No
+// reporting is built on top of this yet — it exists so the loop's exit gate
+// (outsider circles completing an outing; guest→account conversion rate) is
+// measurable at all, per the product blueprint's own instrumentation note.
+model Event {
+  id        String    @id @default(cuid())
+  type      EventType
+  outingId  String?   @map("outing_id")
+  metadata  Json      @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([type, createdAt])
+  @@map("events")
 }
 
 // Per-member excitement score (1..10) for an outing's movie. Group hype is the

@@ -215,6 +215,10 @@ export const httpBackend: Backend = {
         method: 'POST',
         body: JSON.stringify({ score }),
       }),
+    lock: (outingId) => api<OutingDto>(`/outings/${outingId}/lock`, { method: 'POST' }),
+    unlock: (outingId) => api<OutingDto>(`/outings/${outingId}/unlock`, { method: 'POST' }),
+    recordLinkShared: (outingId) =>
+      api<void>(`/outings/${outingId}/link-shared`, { method: 'POST' }),
   },
 
   friends: {

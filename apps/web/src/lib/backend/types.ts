@@ -109,6 +109,11 @@ export interface OutingsApi {
   voteTheater(outingId: string, optionId: string): Promise<OutingDto>;
   voteNight(outingId: string, optionId: string): Promise<OutingDto>;
   setHype(outingId: string, score: number): Promise<OutingDto>;
+  /** Freeze/unfreeze guest writes on the public outing page. Admin-only. */
+  lock(outingId: string): Promise<OutingDto>;
+  unlock(outingId: string): Promise<OutingDto>;
+  /** Best-effort funnel signal for the "copy invite link" action. */
+  recordLinkShared(outingId: string): Promise<void>;
 }
 
 export interface FriendsApi {

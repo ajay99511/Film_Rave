@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -11,6 +11,7 @@ import {
   RsvpStatus,
   type OutingDto,
 } from '@filmrave/shared';
+import { EventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 
@@ -20,6 +21,8 @@ type OutingRow = {
   movieTmdbId: number;
   status: OutingStatus;
   ticketsOnSaleDate: string | null;
+  slug: string;
+  lockedAt: Date | null;
   rsvps: { outingId: string; userId: string; status: RsvpStatus }[];
   theaterVotes: {
     outingId: string;
@@ -53,6 +56,21 @@ export class OutingsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  /**
+   * A public, unguessable identifier for the guest outing page — never
+   * derived from `Outing.id`, so the internal cuid stays out of shared URLs.
+   * ~53 bits of entropy per attempt; retried on the astronomically rare
+   * collision rather than failing outright.
+   */
+  private async generateUniqueSlug(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = randomBytes(9).toString('base64url').slice(0, 12);
+      const existing = await this.prisma.outing.findUnique({ where: { slug } });
+      if (!existing) return slug;
+    }
+    throw new Error('failed to generate a unique outing slug');
+  }
+
   private async assertMember(circleId: string, userId: string): Promise<void> {
     const member = await this.prisma.circleMember.findUnique({
       where: { circleId_userId: { circleId, userId } },
@@ -60,6 +78,56 @@ export class OutingsService {
     if (!member) {
       throw new ForbiddenException('not a member of this circle');
     }
+  }
+
+  private async assertAdmin(circleId: string, userId: string): Promise<void> {
+    const member = await this.prisma.circleMember.findUnique({
+      where: { circleId_userId: { circleId, userId } },
+    });
+    if (!member) throw new ForbiddenException('not a member of this circle');
+    if (member.role !== 'admin') {
+      throw new ForbiddenException('only a circle admin can do this');
+    }
+  }
+
+  /** Freeze guest writes on the outing's public page. Member writes (RSVP,
+   * votes, hype from inside the app) are unaffected — this is an abuse lever
+   * for the public surface only, not a general outing freeze. */
+  async lock(outingId: string, userId: string): Promise<OutingDto> {
+    const outing = await this.prisma.outing.findUnique({ where: { id: outingId } });
+    if (!outing) throw new NotFoundException('outing not found');
+    await this.assertAdmin(outing.circleId, userId);
+    await this.prisma.outing.update({
+      where: { id: outingId },
+      data: { lockedAt: new Date() },
+    });
+    return this.get(outingId);
+  }
+
+  async unlock(outingId: string, userId: string): Promise<OutingDto> {
+    const outing = await this.prisma.outing.findUnique({ where: { id: outingId } });
+    if (!outing) throw new NotFoundException('outing not found');
+    await this.assertAdmin(outing.circleId, userId);
+    await this.prisma.outing.update({
+      where: { id: outingId },
+      data: { lockedAt: null },
+    });
+    return this.get(outingId);
+  }
+
+  /** Best-effort funnel signal: an organizer copied the guest invite link.
+   * Undercounts real distribution (a copy isn't necessarily a forward, and a
+   * forward isn't captured at all) — documented limitation, not solved
+   * further this phase. Any member may fire this, not just admins. */
+  async recordLinkShared(outingId: string, userId: string): Promise<void> {
+    const outing = await this.prisma.outing.findUnique({ where: { id: outingId } });
+    if (!outing) throw new NotFoundException('outing not found');
+    await this.assertMember(outing.circleId, userId);
+    await this.prisma.event
+      .create({ data: { type: EventType.link_shared, outingId } })
+      .catch(() => {
+        /* analytics is not allowed to fail the request it's attached to */
+      });
   }
 
   async listForCircle(circleId: string, userId: string): Promise<OutingDto[]> {
@@ -109,6 +177,7 @@ export class OutingsService {
         movieTmdbId: input.movieTmdbId,
         status: OutingStatus.Planned,
         ticketsOnSaleDate: input.ticketsOnSaleDate ?? null,
+        slug: await this.generateUniqueSlug(),
         theaterVotes: {
           create: theaters.map((name, position) => ({
             optionId: randomUUID(),
@@ -313,6 +382,8 @@ export class OutingsService {
         score: h.score,
       })),
       group_hype: groupHype,
+      slug: o.slug,
+      locked: o.lockedAt != null,
     };
   }
 }

@@ -78,12 +78,29 @@ export interface OutingRow {
   movie_tmdb_id: number;
   status: OutingStatus;
   tickets_on_sale_date: string | null;
+  /** Public, unguessable id for the guest outing page (/o/[slug]). */
+  slug: string;
+  /** ISO timestamp, or null. Freezes further *guest* writes only. */
+  locked_at: string | null;
 }
 
 export type TheaterVoteRow = TheaterVoteDto;
 export type NightVoteRow = NightVoteDto;
 export type OutingHypeRow = OutingHypeDto;
 export type OutingRsvpRow = OutingRsvpDto;
+
+/** guest_rsvps — an anonymous visitor's RSVP/vote on one outing, mirroring the
+ * API's GuestRsvp table. `guest_token` is the local stand-in for the httpOnly
+ * cookie (stored under its own localStorage key, see local/public-outings.ts). */
+export interface GuestRsvpRow {
+  outing_id: string;
+  guest_token: string;
+  display_name: string;
+  status: OutingRsvpDto['status'];
+  voted_night_option_id: string | null;
+  claimed_by_user_id: string | null;
+  created_at: string;
+}
 
 /** chat_messages */
 export type ChatMessageRow = ChatMessageDto;
@@ -108,6 +125,7 @@ export interface Database {
   night_votes: NightVoteRow[];
   outing_hypes: OutingHypeRow[];
   outing_rsvps: OutingRsvpRow[];
+  guest_rsvps: GuestRsvpRow[];
   chat_messages: ChatMessageRow[];
   notifications: NotificationRow[];
 }

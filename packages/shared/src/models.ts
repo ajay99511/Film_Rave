@@ -124,6 +124,47 @@ export interface OutingDto {
   hypes: OutingHypeDto[];
   /** Server-computed average of `hypes` (null when nobody has set hype). */
   group_hype: number | null;
+  /** Public, unguessable id for the guest outing page (/o/[slug]). */
+  slug: string;
+  /** True once an admin has frozen further *guest* writes on the public page. */
+  locked: boolean;
+}
+
+/** One attendee shown on a public outing page — first name/avatar only, never
+ * a handle or email, whether they're a circle member or an anonymous guest. */
+export interface PublicAttendeeDto {
+  display_name: string;
+  avatar_url?: string | null;
+  is_guest: boolean;
+}
+
+export interface PublicVoteOptionDto {
+  option_id: string;
+  label: string;
+  position: number;
+  vote_count: number;
+}
+
+/**
+ * What an anonymous guest may see about an outing (GET /outings/public/:slug).
+ * Deliberately narrower than OutingDto — no handles, emails, ratings, or
+ * per-voter identity, matching the same visibility discipline as ratings.
+ */
+export interface PublicOutingDto {
+  outing_id: string;
+  slug: string;
+  movie: MovieDto;
+  status: OutingStatus;
+  locked: boolean;
+  tickets_on_sale_date?: string | null;
+  attendees_going: PublicAttendeeDto[];
+  theater_options: PublicVoteOptionDto[];
+  night_options: PublicVoteOptionDto[];
+  group_hype: number | null;
+  /** Present only when the requesting browser already holds a guest cookie
+   * for this outing, so the client can render "you already answered" state. */
+  my_guest_status?: RsvpStatus | null;
+  my_guest_night_vote?: string | null;
 }
 
 export interface NotificationDto {

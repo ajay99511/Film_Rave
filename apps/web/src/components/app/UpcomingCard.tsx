@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Calendar, MapPin, Flame, Clock, Check } from 'lucide-react';
+import { Calendar, MapPin, Flame, Clock, Check, Link2, Lock, Unlock } from 'lucide-react';
 import type {
   AppUserDto,
   MovieDto,
@@ -34,6 +34,7 @@ export function UpcomingCard({
   onChange: (o: OutingDto) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const myHype = outing.hypes.find((h) => h.user_id === currentUser.user_id)?.score ?? 0;
   const myRsvp = outing.rsvps.find((r) => r.user_id === currentUser.user_id)?.status;
   const going = outing.rsvps.filter((r) => r.status === 'going');
@@ -53,6 +54,15 @@ export function UpcomingCard({
 
   const userOf = (id: string) =>
     users[id] ?? { user_id: id, display_name: 'Member', handle: 'm' };
+
+  const copyInviteLink = async () => {
+    const url = `${window.location.origin}/o/${outing.slug}`;
+    await navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+    // Best-effort funnel signal; never blocks the copy itself.
+    outingsApi.recordLinkShared(outing.outing_id).catch(() => {});
+  };
 
   return (
     <motion.div
@@ -209,6 +219,28 @@ export function UpcomingCard({
             </div>
           </div>
         )}
+
+        {/* Guest invite link — opens the growth loop (F-06): a non-member can
+            open this URL, RSVP, and vote without an account. */}
+        <div className="pt-4 border-t border-indigo-500/50 mt-4 flex gap-2">
+          <button
+            onClick={() => void copyInviteLink()}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold uppercase tracking-wide bg-indigo-700/60 text-indigo-100 hover:bg-indigo-700 transition-colors"
+          >
+            <Link2 className="w-4 h-4" />
+            {linkCopied ? 'Link copied!' : 'Copy invite link'}
+          </button>
+          <button
+            disabled={busy}
+            onClick={() =>
+              run(outing.locked ? outingsApi.unlock(outing.outing_id) : outingsApi.lock(outing.outing_id))
+            }
+            title={outing.locked ? 'Unlock guest RSVPs' : 'Lock guest RSVPs'}
+            className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wide bg-indigo-700/60 text-indigo-100 hover:bg-indigo-700 transition-colors disabled:opacity-60"
+          >
+            {outing.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
     </motion.div>
   );

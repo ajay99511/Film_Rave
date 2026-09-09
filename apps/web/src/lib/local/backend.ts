@@ -152,6 +152,8 @@ function toOutingDto(o: OutingRow): OutingDto {
       .sort((a, b) => a.position - b.position),
     hypes,
     group_hype,
+    slug: o.slug,
+    locked: o.locked_at != null,
   };
 }
 
@@ -553,6 +555,8 @@ export const localBackend: Backend = {
           movie_tmdb_id: input.movie_tmdb_id,
           status: 'planned',
           tickets_on_sale_date: input.tickets_on_sale_date ?? null,
+          slug: newId('o').replace(/^o_/, ''),
+          locked_at: null,
         });
         theaters.forEach((name, position) => {
           database.theater_votes.push({
@@ -624,6 +628,42 @@ export const localBackend: Backend = {
         if (score > 0) database.outing_hypes.push({ outing_id: outingId, user_id: me, score });
       });
       return toOutingDto(requireOuting(outingId));
+    },
+
+    async lock(outingId) {
+      const me = requireUserId();
+      const outing = requireOuting(outingId);
+      const admin = membersOf(outing.group_id).find((m) => m.user_id === me);
+      if (!admin || admin.role !== 'admin') {
+        throw new ApiError(403, 'only a circle admin can do this');
+      }
+      mutate((database) => {
+        const row = database.outings.find((o) => o.outing_id === outingId);
+        if (row) row.locked_at = new Date().toISOString();
+      });
+      return toOutingDto(requireOuting(outingId));
+    },
+
+    async unlock(outingId) {
+      const me = requireUserId();
+      const outing = requireOuting(outingId);
+      const admin = membersOf(outing.group_id).find((m) => m.user_id === me);
+      if (!admin || admin.role !== 'admin') {
+        throw new ApiError(403, 'only a circle admin can do this');
+      }
+      mutate((database) => {
+        const row = database.outings.find((o) => o.outing_id === outingId);
+        if (row) row.locked_at = null;
+      });
+      return toOutingDto(requireOuting(outingId));
+    },
+
+    async recordLinkShared(outingId) {
+      const me = requireUserId();
+      const outing = requireOuting(outingId);
+      requireMembership(outing.group_id, me);
+      // No local analytics sink to write to — this is a no-op mirror of the
+      // http backend's best-effort Event insert.
     },
   },
 

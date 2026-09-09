@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Script from 'next/script';
 import { motion } from 'motion/react';
 import { Clapperboard } from 'lucide-react';
@@ -27,18 +27,36 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 const isDemo = DATA_SOURCE === 'local';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Where to land after sign-in — e.g. back on a guest outing page the
+  // visitor arrived from (?returnTo=/o/<slug>). Defaults to the app shell.
+  // Only ever a same-site path — rejects an absolute/external URL so this
+  // query param can't be turned into an open redirect.
+  const returnToParam = searchParams.get('returnTo');
+  const returnTo =
+    returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//')
+      ? returnToParam
+      : '/app';
   const btnRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gsiReady, setGsiReady] = useState(false);
 
-  const enter = useCallback(() => router.replace('/app'), [router]);
+  const enter = useCallback(() => router.replace(returnTo), [router, returnTo]);
 
-  // Already signed in? Skip straight to the app.
+  // Already signed in? Skip straight to the destination.
   useEffect(() => {
-    if (session.access && session.user) router.replace('/app');
-  }, [router]);
+    if (session.access && session.user) router.replace(returnTo);
+  }, [router, returnTo]);
 
   const signInWithToken = useCallback(
     async (idToken: string) => {

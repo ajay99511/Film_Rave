@@ -13,8 +13,10 @@ import { buildSeed } from './seed';
 
 const STORAGE_KEY = 'filmrave.local.db';
 // Bumped to 2 when identity moved from phone/OTP to Google (user row shape
-// changed), forcing a reseed of any older persisted demo store.
-const SCHEMA_VERSION = 2;
+// changed). Bumped to 3 when outings gained slug/locked_at and the
+// guest_rsvps table was added (F-06). Both force a reseed of any older
+// persisted demo store.
+const SCHEMA_VERSION = 3;
 
 interface Persisted {
   schema_version: number;

@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { OutingDto } from '@filmrave/shared';
 import { OutingsService } from './outings.service.js';
+import type { PrismaService } from '../prisma/prisma.service.js';
+import type { NotificationsService } from '../notifications/notifications.service.js';
 
 /**
  * The leading theater option is decided by vote count, with ties broken by
@@ -24,6 +26,8 @@ function outing(
     night_options: [],
     hypes: [],
     group_hype: null,
+    slug: 'test-slug-123',
+    locked: false,
   };
 }
 
@@ -46,5 +50,64 @@ describe('OutingsService.leadingOption', () => {
       { option_id: 'b', position: 0, voter_ids: ['u2'] },
     ]);
     expect(OutingsService.leadingOption(o)).toBe('b');
+  });
+});
+
+function makeLockService(member: { role: string } | null) {
+  const outingRow = {
+    id: 'o1',
+    circleId: 'c1',
+    movieTmdbId: 550,
+    status: 'planned',
+    ticketsOnSaleDate: null,
+    slug: 'abc123def456',
+    lockedAt: null,
+    rsvps: [],
+    theaterVotes: [],
+    nightVotes: [],
+    hypes: [],
+  };
+  const updateFn = vi.fn().mockResolvedValue(outingRow);
+  const prisma = {
+    outing: {
+      findUnique: vi.fn().mockResolvedValue(outingRow),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(outingRow),
+      update: updateFn,
+    },
+    circleMember: {
+      findUnique: vi.fn().mockResolvedValue(member),
+    },
+  } as unknown as PrismaService;
+  const notifications = {} as unknown as NotificationsService;
+  return { service: new OutingsService(prisma, notifications), updateFn };
+}
+
+describe('OutingsService.lock / unlock', () => {
+  it('rejects a non-admin member', async () => {
+    const { service } = makeLockService({ role: 'member' });
+    await expect(service.lock('o1', 'u1')).rejects.toThrow(
+      'only a circle admin can do this',
+    );
+  });
+
+  it('rejects a non-member entirely', async () => {
+    const { service } = makeLockService(null);
+    await expect(service.lock('o1', 'u1')).rejects.toThrow(
+      'not a member of this circle',
+    );
+  });
+
+  it('lets an admin lock and unlock', async () => {
+    const { service, updateFn } = makeLockService({ role: 'admin' });
+    await service.lock('o1', 'admin1');
+    expect(updateFn).toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      data: { lockedAt: expect.any(Date) },
+    });
+    await service.unlock('o1', 'admin1');
+    expect(updateFn).toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      data: { lockedAt: null },
+    });
   });
 });
