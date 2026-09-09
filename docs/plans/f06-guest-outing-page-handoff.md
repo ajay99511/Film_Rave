@@ -1,8 +1,15 @@
 # Handoff: Guest-accessible shareable outing page (F-06)
 
-**Plan:** `docs/plans/f06-guest-outing-page.md`  ·  **Status:** Partial — code complete and locally
-verified where possible; two verification steps genuinely could not be run in this environment (see
-below). Not committed to git — left staged for your review first.
+**Plan:** `docs/plans/f06-guest-outing-page.md`  ·  **Status:** Complete — migration applied and the
+full guest RSVP/vote/lock flow verified end-to-end against a real Postgres + running API (see
+"Update" below). Committed at `d4b255c`; this update's DB-verification steps ran after that commit
+and touched no files, only the live dev database.
+
+**Update (post-commit):** Docker became available after the original handoff was written. Applied
+the migration for real, ran the guest flow against the live API with `curl` and a cookie jar, and
+confirmed the database state directly via `psql` — this closes the two biggest gaps flagged below.
+The original verification section is left intact underneath for the record; new evidence is appended
+to it rather than replacing it.
 
 ## Summary
 
@@ -19,14 +26,14 @@ funnel steps the growth loop's success is measured by.
 | Criterion | Status | Evidence |
 |---|---|---|
 | Logged-out browser can open `/o/<slug>` and see poster/tallies/attendees/hype | Met | `next build` succeeded, route registered as dynamic (`ƒ /o/[slug]`); SSR curl smoke test against a running dev server returned HTTP 200 with correct title, movie name, attendee, night/theater option labels and vote counts (local/demo mode) |
-| RSVP with name persists across reload (cookie) | **Not independently verified** | Implemented (httpOnly cookie in http mode, localStorage key in local mode) and unit-tested for the reuse-vs-create logic, but I could not exercise real cookie round-trip in a live browser — see "Not verified" below |
+| RSVP with name persists across reload (cookie) | Met | Real `curl -c/-b` cookie-jar session against the live API + DB: RSVP, then re-GET with the cookie returns `my_guest_status: "going"` and no duplicate guest row (see Update below) |
 | Guest can vote on a night option; guest can't vote theater | Met | `public-outings.service.spec.ts`: tally-merge test; no theater-vote route exists on the public controller at all (by design) |
 | Admin lock freezes guest writes; unlock reverses it | Met | `outings.service.spec.ts` lock/unlock tests (non-admin rejected, non-member rejected, admin succeeds); `public-outings.service.spec.ts` "rejects writes to a locked outing" |
 | Unknown slug → 404, not 500 or data leak | Met | `getPublic` throws `NotFoundException`; curl smoke test confirmed `HTTP 404` for an unknown slug |
 | Shared link renders a rich preview (OG tags) | Met | `generateMetadata` in `page.tsx` sets title/description/`openGraph.images` from the movie poster; confirmed present in the built page's `<title>` via curl |
 | Guest→user claim sets `claimed_by_user_id`, never `OutingRsvp`/`CircleMember` | Met | New spec test asserts this explicitly against a mock `PrismaService` that has no `outingRsvp`/`circleMember` delegate at all — an accidental write would throw, not silently pass |
 | Rate limiting + per-outing guest cap block runaway writes | Met (unit level) | `@Throttle` on all three public write routes (10–20/min); 200-row cap enforced in service, tested |
-| Works in both `NEXT_PUBLIC_DATA_SOURCE=local` and `=http` | **Partial** | `local` mode SSR-verified via curl; `http` mode could not be exercised end-to-end — no local Postgres available (Docker not running) |
+| Works in both `NEXT_PUBLIC_DATA_SOURCE=local` and `=http` | Met | `local` mode SSR-verified via curl against `next dev`; `http` mode's full API contract (read/RSVP/vote/lock/404) verified end-to-end against a live NestJS + Postgres instance (see Update below) |
 
 ## Changes
 
@@ -73,19 +80,46 @@ to commit without being asked.
   spec's fake `PrismaService` only after seeing `logEvent` throw `Cannot read properties of
   undefined (reading 'create')` — the failure was for the right reason, not a tautology)
 
-**Not verified — be aware before treating this as done:**
-- **No live Postgres was available** (Docker Desktop not running in this environment). The
-  migration was never applied to a real database. Before shipping: run
-  `docker compose up -d db && pnpm db:migrate` and confirm the migration applies cleanly against a
-  DB that already has the seeded outing row (exercises the backfill step for real, not just by
-  inspection).
-- **`NEXT_PUBLIC_DATA_SOURCE=http` end-to-end flow was not exercised** for the same reason (needs
-  the API running against a real DB). The `http`-mode code paths (cookie set/read, CORS+credentials,
-  the real claim endpoint) are implemented to the same contract as the tested `local`-mode paths and
-  typecheck/build cleanly, but have not been run.
+**Update — real database + real API verification (post-commit, Docker now available):**
+- `pnpm db:migrate` (via `prisma migrate dev`) hung acquiring Postgres's advisory lock behind a
+  stale idle connection from an earlier attempt; identified via
+  `SELECT pid, state, wait_event, query FROM pg_stat_activity`, terminated the stale connection with
+  `pg_terminate_backend`, then `npx prisma migrate deploy` applied cleanly: **"4 migrations found...
+  No pending migrations to apply"** confirmed after the fact that it had actually already gone
+  through during the earlier hang, once the lock cleared. `psql \d outings` confirms `slug` is
+  `NOT NULL UNIQUE` and `locked_at` is nullable, exactly as designed.
+- **Backfill verified against real pre-existing data**, not just inspected: the one seeded `Outing`
+  row (`cmswl16v40007xfkgtahuexej`) got a real, unique backfilled slug (`e2a16ccb75b4`) — the
+  expand→backfill→contract migration genuinely works against a table that already had rows.
+- Started the real API (`pnpm dev` → NestJS on :4000) against this now-migrated database and ran the
+  guest flow with `curl -c/-b` (a real cookie jar, not local mode):
+  - `GET /outings/public/e2a16ccb75b4` → 200, full DTO, `my_guest_status: null`
+  - `POST .../rsvp {display_name: CurlTester, status: going}` → 201, minted an httpOnly
+    `fr_guest_e2a16ccb75b4` cookie, `CurlTester` appeared in `attendees_going` with `is_guest: true`
+  - Re-`GET` with the same cookie → `my_guest_status: "going"`, attendee list still exactly 4 people
+    (no duplicate row created on repeat access)
+  - `POST .../vote-night {option_id: n1}` with the same cookie → 201, `n1`'s `vote_count` went 3→4,
+    `my_guest_night_vote: "n1"`
+  - Same vote-night call **without** the cookie → 400 `{"code":"RSVP_REQUIRED"}`
+  - Manually set `locked_at = now()` via `psql`, then `POST .../rsvp` → 403
+    `{"code":"OUTING_LOCKED"}`; unlocked again afterward
+  - `GET /outings/public/does-not-exist` → 404
+  - Confirmed via `psql` directly: exactly **one** `guest_rsvps` row existed throughout, with
+    `status='going'`, `voted_night_option_id='n1'` — matching the API responses exactly, and the
+    response JSON at every step contained only `display_name`/`avatar_url`/`is_guest` per attendee,
+    never a `handle` or `email`
+  - Test data (`CurlTester`'s guest row) deleted from the dev DB afterward; API process stopped
+- This closes the "cookie round-trip unverified" and "http mode not exercised" gaps below. What's
+  still not verified is a real *browser* click-through (see next bullet) and the authenticated
+  lock/unlock + claim routes specifically (their authorization logic is unit-tested; the locked-state
+  *enforcement* on guest writes was just verified for real via direct SQL + curl above, but going
+  through the actual `POST /outings/:id/lock` route needs a real JWT, which needs a real Google
+  sign-in this environment can't perform non-interactively).
 - **The Chrome browser extension was not connected** in this environment, so no real interactive
-  click-through (RSVP submit → reload → cookie persists; night-vote; lock toggle from the UI) was
-  performed. The curl smoke test only exercises the SSR read path, which has no JavaScript.
+  click-through (typing in the RSVP form, clicking buttons, watching the page re-render) was
+  performed — only direct HTTP calls. The underlying request/response cycle those buttons trigger is
+  now verified end-to-end (above), so the remaining risk is narrowly in the React component
+  (`GuestOutingActions.tsx`) itself, not the API contract it calls.
 - **Lint** (`pnpm lint`) fails at baseline — `eslint` the core package is entirely missing from
   every workspace package's resolved dependencies (only plugins/configs are in the lockfile), a
   pre-existing gap unrelated to this work. Confirmed unchanged before/after this session's changes.
@@ -132,21 +166,18 @@ to commit without being asked.
 
 ## Risks and what to watch
 
-- **Highest risk: the migration has never touched a real database.** The backfill SQL
-  (`substr(md5(random()::text || clock_timestamp()::text || "outing_id"), 1, 12)`) is standard core
-  Postgres with no extension dependency, and the schema validated cleanly, but "validated" is not
-  "ran." Run it against a copy of real data before deploying, per the plan's own rollout section.
-  If `guest_rsvps`/`events` tables already exist from a prior partial run, the migration is not
-  idempotent (`CREATE TABLE` without `IF NOT EXISTS`) — check for that specifically if a previous
-  attempt was interrupted.
-- **Cookie behavior is unverified in a real browser.** The logic is unit-tested at the service
-  level and the CORS+credentials config was confirmed correct by reading `main.ts`, but the actual
-  set-cookie/send-cookie round-trip across the Next.js↔NestJS origin boundary has not been observed
-  running. This is the single most important manual check before shipping — a `curl -c cookies.txt
-  -b cookies.txt` two-request session against a running API, or a real browser click-through, would
-  close this gap in minutes once a DB is available.
+- ~~The migration has never touched a real database~~ — **resolved**: applied and verified against
+  the real dev DB (see Update above), including the backfill against a pre-existing row.
+- ~~Cookie behavior is unverified~~ — **resolved for the HTTP layer**: a real cookie jar round-tripped
+  correctly through the live API (see Update above). What remains unverified is the React
+  component's own event handling (form submission, re-render on response) in an actual browser —
+  lower risk, since it's calling an API contract now proven correct.
 - **`guest_viewed` event volume will be noisy** (see Deviations) — don't trust it as a precise view
   count without first understanding the ~2x inflation from the client reconciliation fetch.
+- The migration's `CREATE TABLE` statements aren't `IF NOT EXISTS` — fine for the normal path
+  (confirmed `prisma migrate deploy` tracks it correctly in `_prisma_migrations` and won't re-run
+  it), but if a future environment's migration history table ever gets out of sync with actual
+  schema state, a manual reconciliation would be needed rather than a blind re-run.
 
 ## Rollback
 
@@ -159,8 +190,13 @@ dependencies.
 
 ## Follow-ups not done
 
-- Apply the migration against a real database and run the manual cookie round-trip check (see
-  Risks) — the two items this session genuinely could not close.
+- A real *browser* click-through of `GuestOutingActions.tsx` (typing, clicking, watching re-renders)
+  — the API contract it calls is now verified end-to-end, but the component itself hasn't been
+  driven interactively.
+- Exercise the authenticated `POST /outings/:id/lock`/`/unlock`/`claim` routes against the real API
+  with a genuine Google-issued JWT (needs an interactive OAuth sign-in this environment can't do
+  non-interactively) — their authorization logic is unit-tested, and the *effect* of a locked outing
+  on guest writes was verified for real via direct SQL + curl, but the routes themselves weren't hit.
 - Add the missing `Outing → Movie` Prisma relation properly, after checking existing data for
   orphaned `movieTmdbId` values that would violate the FK.
 - Human-readable slugs (movie-title-based) instead of opaque random ones — explicitly deferred by
