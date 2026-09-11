@@ -1,10 +1,14 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { ChatMessageDto } from '@filmrave/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { MoviesService } from '../movies/movies.service.js';
 
 @Injectable()
 export class ChatService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly movies: MoviesService,
+  ) {}
 
   private async assertMember(circleId: string, userId: string): Promise<void> {
     const member = await this.prisma.circleMember.findUnique({
@@ -36,6 +40,11 @@ export class ChatService {
     body: string,
   ): Promise<ChatMessageDto> {
     await this.assertMember(circleId, userId);
+    // The movie row is normally already cached (a thread only opens from a
+    // movie already in the feed), but "share to circle" can be the very
+    // first thing that references a movie in this circle — guarantee the FK
+    // target exists rather than assume it.
+    await this.movies.getOrFetch(movieTmdbId);
     const row = await this.prisma.chatMessage.create({
       data: { circleId, movieTmdbId, userId, body },
     });

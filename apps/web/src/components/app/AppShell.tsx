@@ -1293,6 +1293,7 @@ export function AppShell() {
         <TMDBPopularSection
           watchlistIds={watchlistIds}
           ratedScores={ratedScores}
+          circles={circleList}
           onChanged={refreshLibrary}
           onPlanParty={planParty}
         />

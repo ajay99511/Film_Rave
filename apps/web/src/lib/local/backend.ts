@@ -403,14 +403,19 @@ export const localBackend: Backend = {
       const members = membersOf(id);
       const memberIds = new Set(members.map((m) => m.user_id));
 
-      // Movies with any circle activity: a member rated it, or it was co-watched.
+      // Movies with any circle activity: a member rated it, it was co-watched,
+      // or it was shared into the circle's chat (even with no rating yet —
+      // otherwise a shared movie would be unreachable).
       const ratedIds = table('ratings')
         .filter((r) => memberIds.has(r.user_id))
         .map((r) => r.movie_tmdb_id);
       const watchedIds = table('group_watches')
         .filter((w) => w.group_id === id)
         .map((w) => w.movie_tmdb_id);
-      const movieIds = [...new Set([...ratedIds, ...watchedIds])];
+      const chattedIds = table('chat_messages')
+        .filter((m) => m.group_id === id)
+        .map((m) => m.movie_tmdb_id);
+      const movieIds = [...new Set([...ratedIds, ...watchedIds, ...chattedIds])];
 
       const coWatched = new Set(watchedIds);
       const items: FeedItemDto[] = [];
@@ -474,6 +479,21 @@ export const localBackend: Backend = {
             created_at: new Date().toISOString(),
           });
         }
+      });
+    },
+
+    async shareMovie(id, movieTmdbId, message) {
+      const me = requireUserId();
+      requireMembership(id, me);
+      mutate((database) => {
+        database.chat_messages.push({
+          message_id: newId('msg'),
+          group_id: id,
+          movie_tmdb_id: movieTmdbId,
+          user_id: me,
+          body: message?.trim() ? message.trim() : 'Shared this movie with the circle.',
+          sent_at: new Date().toISOString(),
+        });
       });
     },
   },

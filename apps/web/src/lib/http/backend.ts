@@ -161,6 +161,14 @@ export const httpBackend: Backend = {
         method: 'POST',
         body: JSON.stringify({ movie_tmdb_id, watched_date }),
       }),
+    shareMovie: (id, movieTmdbId, message) =>
+      api<void>(`/circles/${id}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({
+          movie_tmdb_id: movieTmdbId,
+          body: message?.trim() ? message.trim() : 'Shared this movie with the circle.',
+        }),
+      }),
   },
 
   ratings: {

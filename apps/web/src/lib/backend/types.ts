@@ -81,6 +81,9 @@ export interface CirclesApi {
   ): Promise<{ shared_rated_count: number; group_average: number | null }>;
   chat(id: string, tmdbId: number): Promise<ChatMessageDto[]>;
   addGroupWatch(id: string, movieTmdbId: number, watchedDate?: string): Promise<void>;
+  /** Post a movie into the circle's feed via its chat thread — the "share
+   * this to a circle" action from a browse/watchlist screen. */
+  shareMovie(id: string, movieTmdbId: number, message?: string): Promise<void>;
 }
 
 export interface RatingsApi {

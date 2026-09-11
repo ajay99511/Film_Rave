@@ -281,15 +281,24 @@ export class CirclesService {
     const memberIds = members.map((m) => m.userId);
     const memberByUser = new Map(members.map((m) => [m.userId, m]));
 
-    const [ratings, watches] = await Promise.all([
+    const [ratings, watches, chatMovies] = await Promise.all([
       this.prisma.rating.findMany({ where: { userId: { in: memberIds } } }),
       this.prisma.groupWatch.findMany({ where: { circleId } }),
+      // A movie can enter the feed via a shared chat message alone (e.g.
+      // "share to circle" from a browse/watchlist screen), with no rating or
+      // co-watch yet — otherwise a shared movie would be unreachable.
+      this.prisma.chatMessage.findMany({
+        where: { circleId },
+        select: { movieTmdbId: true },
+        distinct: ['movieTmdbId'],
+      }),
     ]);
 
     const movieIds = [
       ...new Set([
         ...ratings.map((r) => r.movieTmdbId),
         ...watches.map((w) => w.movieTmdbId),
+        ...chatMovies.map((c) => c.movieTmdbId),
       ]),
     ];
     if (movieIds.length === 0) return [];

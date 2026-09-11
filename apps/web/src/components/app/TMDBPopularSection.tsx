@@ -16,18 +16,21 @@ import {
   Film,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Star,
 } from 'lucide-react';
-import type { MovieDto } from '@filmrave/shared';
+import type { CircleDto, MovieDto } from '@filmrave/shared';
 import { movies as moviesApi, ratings as ratingsApi, watchlist as watchlistApi } from '@/lib/client';
 import { cn } from '@/lib/ui';
+import { ShareToCircleModal } from './ShareToCircleModal';
 
 type Mode = 'popular' | 'upcoming';
 
 export function TMDBPopularSection({
   watchlistIds,
   ratedScores,
+  circles,
   onChanged,
   onPlanParty,
 }: {
@@ -35,6 +38,8 @@ export function TMDBPopularSection({
   watchlistIds: Set<number>;
   /** tmdb id → my score, for the rating badge. */
   ratedScores: Record<number, number>;
+  /** The user's circles, for the "share to circle" picker. */
+  circles: CircleDto[];
   /** Fired after a watchlist add / rating so the shell can refresh its library. */
   onChanged: () => void;
   /** Plan a group outing for this movie (shown in Upcoming mode). */
@@ -48,6 +53,7 @@ export function TMDBPopularSection({
   const [searching, setSearching] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [rateFor, setRateFor] = useState<number | null>(null);
+  const [shareMovie, setShareMovie] = useState<MovieDto | null>(null);
   const reqId = useRef(0);
 
   const load = useCallback(async (which: Mode) => {
@@ -277,6 +283,14 @@ export function TMDBPopularSection({
                     >
                       {inWatchlist ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
                     </button>
+                    <button
+                      onClick={() => setShareMovie(m)}
+                      disabled={id < 0 || circles.length === 0}
+                      title="Share to a circle"
+                      className="py-1.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
                   {mode === 'upcoming' && onPlanParty && id > 0 && (
@@ -319,6 +333,15 @@ export function TMDBPopularSection({
             );
           })}
         </div>
+      )}
+
+      {shareMovie && (
+        <ShareToCircleModal
+          movie={shareMovie}
+          circles={circles}
+          onClose={() => setShareMovie(null)}
+          onShared={() => setShareMovie(null)}
+        />
       )}
     </div>
   );

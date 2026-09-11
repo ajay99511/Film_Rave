@@ -75,7 +75,7 @@ describe('CirclesService.groupAverage', () => {
 });
 
 describe('CirclesService.feed member_ratings', () => {
-  function makeFeedService() {
+  function makeFeedService(overrides: { chatMovies?: { movieTmdbId: number }[] } = {}) {
     const membersWithUser = [
       {
         userId: 'ada',
@@ -106,11 +106,15 @@ describe('CirclesService.feed member_ratings', () => {
       rating: { findMany: vi.fn().mockResolvedValue(feedRatings) },
       groupWatch: { findMany: vi.fn().mockResolvedValue([]) },
       movie: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ tmdbId: 550, title: 'Fight Club', releaseDate: '1999-10-15', overview: null, posterUrl: null, runtime: null, year: 1999 }]),
+        findMany: vi.fn().mockResolvedValue([
+          { tmdbId: 550, title: 'Fight Club', releaseDate: '1999-10-15', overview: null, posterUrl: null, runtime: null, year: 1999 },
+          { tmdbId: 999, title: 'Shared Movie', releaseDate: '2026-01-01', overview: null, posterUrl: null, runtime: null, year: 2026 },
+        ]),
       },
-      chatMessage: { groupBy: vi.fn().mockResolvedValue([]) },
+      chatMessage: {
+        groupBy: vi.fn().mockResolvedValue([]),
+        findMany: vi.fn().mockResolvedValue(overrides.chatMovies ?? []),
+      },
     } as unknown as PrismaService;
     return new CirclesService(prisma);
   }
@@ -133,5 +137,15 @@ describe('CirclesService.feed member_ratings', () => {
     const item = feed.find((f) => f.movie.tmdb_id === 550)!;
     expect(item.member_ratings.map((r) => r.user_id)).toEqual(['ada', 'zoe']);
     expect(item.member_ratings.map((r) => r.score)).toEqual([9, 4]);
+  });
+
+  it('surfaces a movie that only has a shared chat message, with no ratings yet', async () => {
+    const service = makeFeedService({ chatMovies: [{ movieTmdbId: 999 }] });
+    const feed = await service.feed('c1', 'ada');
+    const shared = feed.find((f) => f.movie.tmdb_id === 999);
+    expect(shared).toBeDefined();
+    expect(shared?.member_ratings).toEqual([]);
+    expect(shared?.my_rating).toBeNull();
+    expect(shared?.group_average).toBeNull();
   });
 });
