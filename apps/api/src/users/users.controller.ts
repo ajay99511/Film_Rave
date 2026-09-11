@@ -1,8 +1,15 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { IsString, Length } from 'class-validator';
 import type { AppUserDto } from '@filmrave/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CurrentUser, type AuthUser } from '../common/current-user.decorator.js';
 import { UsersService } from './users.service.js';
+
+class UpdateHandleDto {
+  @IsString()
+  @Length(3, 20)
+  handle!: string;
+}
 
 @Controller('users')
 export class UsersController {
@@ -16,6 +23,15 @@ export class UsersController {
     @CurrentUser() user: AuthUser,
   ): Promise<AppUserDto[]> {
     return this.users.search(q ?? '', user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  updateMe(
+    @Body() dto: UpdateHandleDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<AppUserDto> {
+    return this.users.updateHandle(user.userId, dto.handle);
   }
 
   // Public (unauthenticated) so invite links resolve a preview before sign-in.

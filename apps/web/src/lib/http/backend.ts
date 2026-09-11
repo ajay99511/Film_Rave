@@ -123,6 +123,8 @@ export const httpBackend: Backend = {
         body: JSON.stringify({ id_token }),
       }),
     me: () => api<AppUserDto>('/auth/me'),
+    updateHandle: (handle) =>
+      api<AppUserDto>('/users/me', { method: 'PATCH', body: JSON.stringify({ handle }) }),
   },
 
   circles: {

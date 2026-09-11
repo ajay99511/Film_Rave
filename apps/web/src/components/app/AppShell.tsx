@@ -61,6 +61,7 @@ import { MovieRoomModal } from './MovieRoomModal';
 import { UpcomingCard } from './UpcomingCard';
 import { CircleFormModal } from './CircleFormModal';
 import { ConfirmModal } from './ConfirmModal';
+import { EditHandleModal } from './EditHandleModal';
 import { LogMovieModal } from './LogMovieModal';
 import { NotificationsPanel } from './NotificationsPanel';
 import { ImportRatingsModal } from './ImportRatingsModal';
@@ -81,7 +82,8 @@ const SHARING_LABEL: Record<RatingsShared, string> = {
 };
 
 export function AppShell() {
-  const { user, ready, signOut } = useRequireAuth();
+  const { user, ready, setUser, signOut } = useRequireAuth();
+  const [editingHandle, setEditingHandle] = useState(false);
   const { isDark, toggle: toggleTheme } = useTheme();
 
   const [circleList, setCircleList] = useState<CircleDto[]>([]);
@@ -483,7 +485,13 @@ export function AppShell() {
               <Avatar user={user} size="md" />
               <div className="flex flex-col items-start leading-tight flex-1">
                 <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{user.display_name}</span>
-                <span className="text-[10px] text-slate-500">@{user.handle}</span>
+                <button
+                  onClick={() => setEditingHandle(true)}
+                  title="Edit your handle"
+                  className="text-[10px] text-slate-500 hover:text-orange-600 dark:hover:text-orange-400 hover:underline"
+                >
+                  @{user.handle}
+                </button>
               </div>
               <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-slate-900 dark:hover:text-white">
                 <LogOut className="w-4 h-4" />
@@ -603,6 +611,16 @@ export function AppShell() {
           onDelete={(c) => {
             setDetailsCircle(null);
             setConfirmDeleteCircle(c);
+          }}
+        />
+      )}
+      {editingHandle && (
+        <EditHandleModal
+          currentHandle={user.handle}
+          onClose={() => setEditingHandle(false)}
+          onSaved={(u) => {
+            setUser(u);
+            setEditingHandle(false);
           }}
         />
       )}

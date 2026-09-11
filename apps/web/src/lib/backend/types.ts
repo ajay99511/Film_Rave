@@ -52,6 +52,8 @@ export interface AuthApi {
   /** Sign in / sign up with a Google Identity Services ID token. */
   google(idToken: string): Promise<AuthTokensDto>;
   me(): Promise<AppUserDto>;
+  /** Change the current user's handle. 3-20 chars: lowercase/digits/underscore. */
+  updateHandle(handle: string): Promise<AppUserDto>;
 }
 
 export interface CirclesApi {

@@ -247,6 +247,25 @@ export const localBackend: Backend = {
       if (!user) throw new ApiError(401, 'Session user no longer exists');
       return toAppUser(user);
     },
+
+    async updateHandle(handle) {
+      const me = requireUserId();
+      const next = handle.trim().toLowerCase();
+      if (!/^[a-z0-9_]{3,20}$/.test(next)) {
+        throw new ApiError(
+          400,
+          'handle must be 3-20 characters: lowercase letters, numbers, underscores',
+        );
+      }
+      const taken = table('users').find((u) => u.handle === next && u.user_id !== me);
+      if (taken) throw new ApiError(409, 'that handle is taken');
+      return mutate((database) => {
+        const user = database.users.find((u) => u.user_id === me);
+        if (!user) throw new ApiError(401, 'Session user no longer exists');
+        user.handle = next;
+        return toAppUser(user);
+      });
+    },
   },
 
   circles: {

@@ -1,6 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AppUserDto } from '@filmrave/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
+
+// Same shape auth.service.ts auto-generates on first sign-in — chosen handles
+// must satisfy the identical constraint so invite links stay well-formed.
+const HANDLE_PATTERN = /^[a-z0-9_]{3,20}$/;
 
 @Injectable()
 export class UsersService {
@@ -30,6 +39,26 @@ export class UsersService {
       take: 20,
     });
     return users.map((u) => this.toDto(u));
+  }
+
+  /** Change the requester's own handle. Invite links (/add/[handle]) point at
+   * the old value until the requester re-shares, same as any username change. */
+  async updateHandle(userId: string, handle: string): Promise<AppUserDto> {
+    const next = handle.trim().toLowerCase();
+    if (!HANDLE_PATTERN.test(next)) {
+      throw new BadRequestException(
+        'handle must be 3-20 characters: lowercase letters, numbers, underscores',
+      );
+    }
+    const existing = await this.prisma.user.findUnique({ where: { handle: next } });
+    if (existing && existing.id !== userId) {
+      throw new ConflictException('that handle is taken');
+    }
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { handle: next },
+    });
+    return this.toDto(user);
   }
 
   private toDto(u: {
