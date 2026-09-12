@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Calendar, MapPin, Flame, Clock, Check, Link2, Lock, Unlock } from 'lucide-react';
+import { Calendar, MapPin, Flame, Clock, Check, Link2, Lock, Unlock, CheckCircle2 } from 'lucide-react';
 import type {
   AppUserDto,
   MovieDto,
@@ -241,6 +241,22 @@ export function UpcomingCard({
             {outing.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
           </button>
         </div>
+
+        {/* Organizer marks the outing as having happened — writes a
+            GroupWatch row and prompts attendees to rate it. */}
+        {outing.status === 'done' ? (
+          <div className="mt-2 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold uppercase tracking-wide bg-emerald-500/10 text-emerald-400">
+            <CheckCircle2 className="w-4 h-4" /> Marked as done
+          </div>
+        ) : (
+          <button
+            disabled={busy}
+            onClick={() => run(outingsApi.markDone(outing.outing_id))}
+            className="mt-2 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold uppercase tracking-wide bg-emerald-600/80 hover:bg-emerald-600 text-white transition-colors disabled:opacity-60"
+          >
+            <CheckCircle2 className="w-4 h-4" /> Mark as done
+          </button>
+        )}
       </div>
     </motion.div>
   );

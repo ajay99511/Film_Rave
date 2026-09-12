@@ -145,6 +145,16 @@ export class OutingsController {
     return this.outings.unlock(outingId, user.userId);
   }
 
+  /** Organizer marks the outing as having happened. Writes a GroupWatch row
+   * and prompts attendees to rate it. Admin-only, idempotent. */
+  @Post(':outingId/done')
+  markDone(
+    @Param('outingId') outingId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<OutingDto> {
+    return this.outings.markDone(outingId, user.userId);
+  }
+
   /** Best-effort funnel instrumentation — see OutingsService.recordLinkShared. */
   @Post(':outingId/link-shared')
   @HttpCode(204)

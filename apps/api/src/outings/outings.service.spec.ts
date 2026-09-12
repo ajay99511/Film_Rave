@@ -111,3 +111,99 @@ describe('OutingsService.lock / unlock', () => {
     });
   });
 });
+
+function makeMarkDoneService(overrides: {
+  member?: { role: string } | null;
+  status?: string;
+  goingRsvps?: { userId: string; status: string }[];
+}) {
+  const outingRow = {
+    id: 'o1',
+    circleId: 'c1',
+    movieTmdbId: 550,
+    status: overrides.status ?? 'planned',
+    ticketsOnSaleDate: null,
+    slug: 'abc123def456',
+    lockedAt: null,
+    rsvps: [],
+    theaterVotes: [],
+    nightVotes: [],
+    hypes: [],
+  };
+  const outingUpdate = vi.fn().mockResolvedValue(outingRow);
+  const groupWatchUpsert = vi.fn().mockResolvedValue({});
+  const createMany = vi.fn().mockResolvedValue(undefined);
+  const prisma = {
+    outing: {
+      findUnique: vi.fn().mockResolvedValue(outingRow),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(outingRow),
+      update: outingUpdate,
+    },
+    circleMember: {
+      findUnique: vi.fn().mockResolvedValue(overrides.member ?? { role: 'admin' }),
+    },
+    groupWatch: { upsert: groupWatchUpsert },
+    outingRsvp: {
+      findMany: vi.fn().mockResolvedValue(
+        (overrides.goingRsvps ?? [{ userId: 'attendee1', status: 'going' }]).map((r) => ({
+          outingId: 'o1',
+          ...r,
+        })),
+      ),
+    },
+    movie: { findUnique: vi.fn().mockResolvedValue({ tmdbId: 550, title: 'Fight Club' }) },
+  } as unknown as PrismaService;
+  const notifications = { createMany } as unknown as NotificationsService;
+  return { service: new OutingsService(prisma, notifications), outingUpdate, groupWatchUpsert, createMany };
+}
+
+describe('OutingsService.markDone', () => {
+  it('rejects a non-admin member', async () => {
+    const { service } = makeMarkDoneService({ member: { role: 'member' } });
+    await expect(service.markDone('o1', 'u1')).rejects.toThrow(
+      'only a circle admin can do this',
+    );
+  });
+
+  it('sets status done, writes a GroupWatch row, and notifies going attendees (not the actor)', async () => {
+    const { service, outingUpdate, groupWatchUpsert, createMany } = makeMarkDoneService({
+      goingRsvps: [
+        { userId: 'admin1', status: 'going' },
+        { userId: 'attendee1', status: 'going' },
+      ],
+    });
+    await service.markDone('o1', 'admin1');
+
+    expect(outingUpdate).toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      data: { status: 'done' },
+    });
+    expect(groupWatchUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { circleId_movieTmdbId: { circleId: 'c1', movieTmdbId: 550 } },
+      }),
+    );
+    expect(createMany).toHaveBeenCalledWith(
+      ['attendee1'], // admin1 is the actor — excluded
+      expect.objectContaining({ type: 'outing_reminder' }),
+    );
+  });
+
+  it('is idempotent — re-marking an already-done outing does nothing further', async () => {
+    const { service, outingUpdate, groupWatchUpsert, createMany } = makeMarkDoneService({
+      status: 'done',
+    });
+    await service.markDone('o1', 'admin1');
+    expect(outingUpdate).not.toHaveBeenCalled();
+    expect(groupWatchUpsert).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('sends no notification when nobody besides the actor RSVP\'d going', async () => {
+    const { service, createMany } = makeMarkDoneService({
+      goingRsvps: [{ userId: 'admin1', status: 'going' }],
+    });
+    await service.markDone('o1', 'admin1');
+    expect(createMany).not.toHaveBeenCalled();
+  });
+});

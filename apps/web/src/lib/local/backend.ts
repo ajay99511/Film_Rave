@@ -729,6 +729,52 @@ export const localBackend: Backend = {
       // No local analytics sink to write to — this is a no-op mirror of the
       // http backend's best-effort Event insert.
     },
+
+    async markDone(outingId) {
+      const me = requireUserId();
+      const outing = requireOuting(outingId);
+      const admin = membersOf(outing.group_id).find((m) => m.user_id === me);
+      if (!admin || admin.role !== 'admin') {
+        throw new ApiError(403, 'only a circle admin can do this');
+      }
+      if (outing.status === 'done') return toOutingDto(outing);
+
+      mutate((database) => {
+        const row = database.outings.find((o) => o.outing_id === outingId);
+        if (row) row.status = 'done';
+
+        const exists = database.group_watches.some(
+          (w) => w.group_id === outing.group_id && w.movie_tmdb_id === outing.movie_tmdb_id,
+        );
+        if (!exists) {
+          database.group_watches.push({
+            group_id: outing.group_id,
+            movie_tmdb_id: outing.movie_tmdb_id,
+            watched_date: new Date().toISOString().slice(0, 10),
+            logged_by: me,
+            created_at: new Date().toISOString(),
+          });
+        }
+
+        const movie = catalogGet(outing.movie_tmdb_id);
+        const going = database.outing_rsvps.filter(
+          (r) => r.outing_id === outingId && r.status === 'going' && r.user_id !== me,
+        );
+        for (const r of going) {
+          database.notifications.unshift({
+            id: newId('ntf'),
+            user_id: r.user_id,
+            type: 'outing_reminder',
+            title: 'How was it?',
+            body: `Rate ${movie?.title ?? 'the movie'} to keep your history — and see what the circle thought.`,
+            data: { group_id: outing.group_id, outing_id: outingId, movie_tmdb_id: outing.movie_tmdb_id },
+            read_at: null,
+            created_at: new Date().toISOString(),
+          });
+        }
+      });
+      return toOutingDto(requireOuting(outingId));
+    },
   },
 
   friends: {

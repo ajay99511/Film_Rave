@@ -130,6 +130,76 @@ export class OutingsService {
       });
   }
 
+  /**
+   * The organizer marks the outing as having actually happened — the
+   * product's own designed lifecycle step (docs/PRODUCT_BLUEPRINT.md §12.2:
+   * "Outing happens (real life) → organizer marks done"), not an automatic
+   * date-based transition: night-vote options are free-text labels
+   * ("Friday Night"), not reliably parseable dates, so there is no signal
+   * to compute this from automatically. Idempotent — re-marking an
+   * already-done outing is a no-op (no duplicate GroupWatch write or
+   * duplicate notifications).
+   */
+  async markDone(outingId: string, userId: string): Promise<OutingDto> {
+    const outing = await this.prisma.outing.findUnique({ where: { id: outingId } });
+    if (!outing) throw new NotFoundException('outing not found');
+    await this.assertAdmin(outing.circleId, userId);
+    if (outing.status === OutingStatus.Done) {
+      return this.get(outingId);
+    }
+
+    await this.prisma.outing.update({
+      where: { id: outingId },
+      data: { status: OutingStatus.Done },
+    });
+    // The shared-history atom this circle+movie now belongs to (blueprint
+    // §12.2: "GroupWatch row written"). `update: {}` deliberately never
+    // overwrites a watched_date a member already logged manually via
+    // CirclesService.addGroupWatch before the organizer got around to this.
+    await this.prisma.groupWatch.upsert({
+      where: {
+        circleId_movieTmdbId: { circleId: outing.circleId, movieTmdbId: outing.movieTmdbId },
+      },
+      create: {
+        circleId: outing.circleId,
+        movieTmdbId: outing.movieTmdbId,
+        watchedDate: new Date().toISOString().slice(0, 10),
+      },
+      update: {},
+    });
+    await this.notifyRateIt(outing.circleId, outingId, outing.movieTmdbId, userId);
+    return this.get(outingId);
+  }
+
+  /** "Rate it — keep your history" prompt to everyone who RSVP'd going,
+   * mirroring the blueprint's "next-day rating prompts to attendees" step.
+   * Reuses the outing_reminder notification type rather than adding a new
+   * Prisma enum value for one more outing-related prompt — the title/body
+   * text is what the user actually sees. */
+  private async notifyRateIt(
+    circleId: string,
+    outingId: string,
+    movieTmdbId: number,
+    actorId: string,
+  ): Promise<void> {
+    const [attendees, movie] = await Promise.all([
+      this.prisma.outingRsvp.findMany({
+        where: { outingId, status: RsvpStatus.Going },
+      }),
+      this.prisma.movie.findUnique({ where: { tmdbId: movieTmdbId } }),
+    ]);
+    const recipients = attendees
+      .map((r) => r.userId)
+      .filter((id) => id !== actorId);
+    if (recipients.length === 0) return;
+    await this.notifications.createMany(recipients, {
+      type: NotificationType.OutingReminder,
+      title: 'How was it?',
+      body: `Rate ${movie?.title ?? 'the movie'} to keep your history — and see what the circle thought.`,
+      data: { circleId, outingId, movieTmdbId },
+    });
+  }
+
   async listForCircle(circleId: string, userId: string): Promise<OutingDto[]> {
     await this.assertMember(circleId, userId);
     const rows = await this.prisma.outing.findMany({

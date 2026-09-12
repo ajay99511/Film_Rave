@@ -117,6 +117,9 @@ export interface OutingsApi {
   /** Freeze/unfreeze guest writes on the public outing page. Admin-only. */
   lock(outingId: string): Promise<OutingDto>;
   unlock(outingId: string): Promise<OutingDto>;
+  /** Organizer marks the outing as having happened: writes a GroupWatch row
+   * and prompts attendees to rate it. Admin-only, idempotent. */
+  markDone(outingId: string): Promise<OutingDto>;
   /** Best-effort funnel signal for the "copy invite link" action. */
   recordLinkShared(outingId: string): Promise<void>;
 }

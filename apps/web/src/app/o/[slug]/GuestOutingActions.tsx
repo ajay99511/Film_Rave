@@ -189,16 +189,15 @@ export function GuestOutingActions({
         </section>
       )}
 
-      {/* Post-outing conversion CTA. Outing.status never reliably transitions
-          to 'done' in the current codebase (no scheduler/cron writes it), so
-          this can't gate on status/date as originally sketched — it shows
-          once the visitor has RSVP'd at all, which is the simplest signal
-          that's actually available. See docs/plans/f06-guest-outing-page.md
-          §9 (deviation recorded there too). */}
-      {hasAnswered && (
+      {/* Post-outing conversion CTA. Originally gated on "has RSVP'd at all"
+          because Outing.status had no way to reach 'done' — the organizer
+          now has a real "Mark as done" action (apps/api OutingsService.
+          markDone), so this gates on the actual signal the product's own
+          design calls for instead of the earlier workaround. */}
+      {outing.status === 'done' && hasAnswered && (
         <section className="rounded-lg border border-marquee-border bg-marquee-surface px-4 py-3 text-sm">
           <p className="mb-2 text-marquee-muted">
-            Want to keep a record of what you watch and rate?
+            Rate it — create your free account to keep your movie history.
           </p>
           <a
             href={`/login?returnTo=${encodeURIComponent(`/o/${slug}`)}`}

@@ -227,6 +227,7 @@ export const httpBackend: Backend = {
       }),
     lock: (outingId) => api<OutingDto>(`/outings/${outingId}/lock`, { method: 'POST' }),
     unlock: (outingId) => api<OutingDto>(`/outings/${outingId}/unlock`, { method: 'POST' }),
+    markDone: (outingId) => api<OutingDto>(`/outings/${outingId}/done`, { method: 'POST' }),
     recordLinkShared: (outingId) =>
       api<void>(`/outings/${outingId}/link-shared`, { method: 'POST' }),
   },
