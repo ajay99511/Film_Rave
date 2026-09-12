@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './config/env.validation.js';
+import { LoggingModule } from './logging/logging.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -20,6 +21,7 @@ import { ImportsModule } from './imports/imports.module.js';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    LoggingModule,
     // Baseline abuse guard: 100 requests / minute / IP. Auth routes tighten this
     // further with @Throttle; /health opts out with @SkipThrottle.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),

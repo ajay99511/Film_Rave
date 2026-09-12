@@ -1,0 +1,48 @@
+name: CI
+
+# Required-check gate: install -> build the shared contract -> typecheck ->
+# lint -> test -> build both apps. Sequential steps in one job — this is a
+# small monorepo (whole pipeline runs in a couple of minutes), so splitting
+# into parallel jobs would only add artifact-passing complexity (the shared
+# package's dist/ would need to move between jobs) for no real speed win.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared contract
+        run: pnpm --filter @filmrave/shared build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build API
+        run: pnpm --filter @filmrave/api build
+
+      - name: Build web
+        run: pnpm --filter @filmrave/web build

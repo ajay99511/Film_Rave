@@ -62,6 +62,70 @@ describe('CirclesService.visibleRatings', () => {
   });
 });
 
+/**
+ * The exhaustive matrix the product blueprint calls out as the most
+ * correctness-critical test obligation in the app: every combination of the
+ * rating author's sharing mode crossed with the requester's relationship to
+ * that rating. `visibleRatings` is the real Prisma-shaped wiring around the
+ * pure `isRatingVisible` predicate (already unit-tested in isolation at
+ * packages/shared/src/visibility.test.ts) — this suite exists to prove the
+ * *wiring* (member lookup, rating lookup, requester matching) doesn't
+ * silently break what the pure function already guarantees.
+ */
+describe('CirclesService.visibleRatings matrix', () => {
+  const AUTHOR = 'author';
+  const OTHER_MEMBER = 'other-member';
+  const MOVIE_ID = 550;
+  const SHARED_MOVIE_ID = MOVIE_ID;
+  const UNSHARED_MOVIE_ID = 999;
+
+  function matrixService(
+    ratingsShared: 'none' | 'approved' | 'selective',
+    sharedMovieIds: number[],
+    ratedMovieId: number,
+  ) {
+    return makeService({
+      members: [
+        { userId: AUTHOR, ratingsShared, sharedMovieIds },
+        { userId: OTHER_MEMBER, ratingsShared: 'none', sharedMovieIds: [] },
+      ],
+      ratings: [{ userId: AUTHOR, movieTmdbId: ratedMovieId, score: 7 }],
+    });
+  }
+
+  const cases: {
+    label: string;
+    ratingsShared: 'none' | 'approved' | 'selective';
+    sharedMovieIds: number[];
+    ratedMovieId: number;
+    visibleToOtherMember: boolean;
+  }[] = [
+    { label: 'none', ratingsShared: 'none', sharedMovieIds: [], ratedMovieId: SHARED_MOVIE_ID, visibleToOtherMember: false },
+    { label: 'approved', ratingsShared: 'approved', sharedMovieIds: [], ratedMovieId: SHARED_MOVIE_ID, visibleToOtherMember: true },
+    { label: 'selective, movie included', ratingsShared: 'selective', sharedMovieIds: [SHARED_MOVIE_ID], ratedMovieId: SHARED_MOVIE_ID, visibleToOtherMember: true },
+    { label: 'selective, movie NOT included', ratingsShared: 'selective', sharedMovieIds: [SHARED_MOVIE_ID], ratedMovieId: UNSHARED_MOVIE_ID, visibleToOtherMember: false },
+  ];
+
+  it.each(cases)(
+    '$label -> author always sees their own rating (self-visibility never depends on sharing mode)',
+    async ({ ratingsShared, sharedMovieIds, ratedMovieId }) => {
+      const service = matrixService(ratingsShared, sharedMovieIds, ratedMovieId);
+      const result = await service.visibleRatings('c1', ratedMovieId, AUTHOR);
+      expect(result.map((r) => r.user_id)).toContain(AUTHOR);
+    },
+  );
+
+  it.each(cases)(
+    '$label -> a different member sees the rating only when visibleToOtherMember is true',
+    async ({ ratingsShared, sharedMovieIds, ratedMovieId, visibleToOtherMember }) => {
+      const service = matrixService(ratingsShared, sharedMovieIds, ratedMovieId);
+      const result = await service.visibleRatings('c1', ratedMovieId, OTHER_MEMBER);
+      const authorVisible = result.some((r) => r.user_id === AUTHOR);
+      expect(authorVisible).toBe(visibleToOtherMember);
+    },
+  );
+});
+
 describe('CirclesService.groupAverage', () => {
   it('averages only shared ratings (self-excluded switch)', async () => {
     const service = makeService({ members, ratings });

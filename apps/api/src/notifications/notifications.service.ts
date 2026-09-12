@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { NotificationDto, NotificationType } from '@filmrave/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -31,7 +32,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body,
-        data: (input.data ?? {}) as object,
+        data: (input.data ?? {}) as Prisma.InputJsonValue,
       },
     });
     return this.toDto(row);
@@ -54,7 +55,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body,
-        data: (input.data ?? {}) as object,
+        data: (input.data ?? {}) as Prisma.InputJsonValue,
       })),
     });
   }

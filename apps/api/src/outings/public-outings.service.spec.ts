@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { RsvpStatus } from '@filmrave/shared';
 import { PublicOutingsService } from './public-outings.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 
@@ -128,7 +129,7 @@ describe('PublicOutingsService.rsvp', () => {
     await expect(
       service.rsvp('abc123def456', undefined, {
         displayName: 'Sam',
-        status: 'going' as never,
+        status: RsvpStatus.Going,
       }),
     ).rejects.toMatchObject({ response: { code: 'OUTING_LOCKED' } });
   });
@@ -150,7 +151,7 @@ describe('PublicOutingsService.rsvp', () => {
     );
     const result = await service.rsvp('abc123def456', 'gt1', {
       displayName: 'Sam',
-      status: 'going' as never,
+      status: RsvpStatus.Going,
     });
     expect(result.guestToken).toBe('gt1');
     expect(guestRsvpUpdate).toHaveBeenCalledOnce();
@@ -170,7 +171,7 @@ describe('PublicOutingsService.rsvp', () => {
     await expect(
       service.rsvp('abc123def456', undefined, {
         displayName: 'One Too Many',
-        status: 'going' as never,
+        status: RsvpStatus.Going,
       }),
     ).rejects.toMatchObject({ response: { code: 'GUEST_LIMIT_REACHED' } });
     expect(guestRsvpCreate).not.toHaveBeenCalled();

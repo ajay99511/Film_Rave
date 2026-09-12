@@ -3,11 +3,24 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   const config = app.get(ConfigService);
+  app.useLogger(app.get(Logger));
+
+  // Helmet's default Cross-Origin-Resource-Policy is `same-origin`, which
+  // browsers enforce independently of the CORS headers below — it would
+  // silently block apps/web (a genuinely different origin, by design) from
+  // reading this API's responses even with valid CORS + credentials. This
+  // API exists specifically to be called cross-origin, so that default is
+  // wrong here, not merely optional.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
   // Ratings-CSV imports post the file as a JSON string; lift the 100kb default.
   app.useBodyParser('json', { limit: '10mb' });
@@ -34,8 +47,7 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(config.get('PORT') ?? 4000);
   await app.listen(port);
-  // eslint-disable-next-line no-console
-  console.log(`FilmRave API listening on http://localhost:${port}/api/v1`);
+  app.get(Logger).log(`FilmRave API listening on http://localhost:${port}/api/v1`);
 }
 
 void bootstrap();

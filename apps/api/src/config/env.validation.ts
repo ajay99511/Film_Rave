@@ -8,9 +8,10 @@ export function validateEnv(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
   const required = ['DATABASE_URL', 'JWT_SECRET', 'GOOGLE_CLIENT_ID'];
-  const missing = required.filter(
-    (key) => !config[key] || String(config[key]).trim() === '',
-  );
+  const missing = required.filter((key) => {
+    const value = config[key];
+    return typeof value !== 'string' || value.trim() === '';
+  });
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(', ')}. ` +
@@ -27,9 +28,16 @@ export function validateEnv(
 
   if (!config.TMDB_API_KEY) {
     // Non-fatal: the /movies endpoints already return 503 until this is set.
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[env] TMDB_API_KEY is not set — /movies endpoints will return 503 until it is configured.',
+    // This runs synchronously inside ConfigModule's `validate` hook, before
+    // Nest's DI container exists — the structured (pino) logger isn't
+    // reachable yet, so this writes the same GCP-shaped JSON line by hand
+    // rather than falling back to plain console output.
+    process.stdout.write(
+      `${JSON.stringify({
+        severity: 'WARNING',
+        message:
+          '[env] TMDB_API_KEY is not set — /movies endpoints will return 503 until it is configured.',
+      })}\n`,
     );
   }
 
