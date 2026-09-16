@@ -32,6 +32,19 @@ jobs:
       - name: Build shared contract
         run: pnpm --filter @filmrave/shared build
 
+      # Without this, @prisma/client resolves to its placeholder/default
+      # client (no real model types) instead of the one generated from our
+      # schema.prisma — every Prisma-typed query then collapses to `{}`,
+      # cascading into implicit-`any` errors across every service that
+      # touches Prisma. `pnpm install`'s postinstall hook is *supposed* to
+      # trigger this automatically, but doesn't reliably find the schema
+      # from a monorepo-root install (same "could not find your Prisma
+      # schema in the default locations" warning seen while building
+      # apps/api/Dockerfile earlier — fixed there with an explicit generate
+      # step; this is that same fix, just missing from CI until now).
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
       - name: Typecheck
         run: pnpm typecheck
 
